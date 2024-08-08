@@ -29,14 +29,14 @@ def list_channels():
         print(f"Error fetching channels: {e.response['error']}")
         return []
 
-def get_user_info():
+def get_user_info(user_id):
     try:
-
-        pass #users.info
+        response = app.client.users_info(user=user_id)
+        return response['user']
 
     except SlackApiError as e:
         print(f"Error fetching member: {e.response['error']}")
-        return []
+        return None
 
 # Example usage: Print all channels and members of the first channel
 def print_channels_and_members():
@@ -48,7 +48,10 @@ def print_channels_and_members():
         members = get_channel_members(channel['id'])
         print('Members:')
         for member in members:
-            print()
+            member_info = get_user_info(member)
+            if member_info['is_bot']:
+                continue
+            print(member_info['name'])
 
 
 
