@@ -2,6 +2,9 @@ import os
 import random
 import base64
 import json
+import hashlib
+import hmac
+import time
 from datetime import datetime
 import urllib.parse
 import urllib.request
@@ -78,31 +81,51 @@ def _ask_for_engagement() -> None:
 
 
 def _respond_to_action(event: dict) -> None:
+
+    # Check that request was sent from the slack application.
+    if 'headers' not in event or 'body' not in event:
+        return {'statusCode': 403}
+
     if event.get('isBase64Encoded'):
-        body_decoded = base64.b64decode(event['body']).decode('utf-8')
+        body = base64.b64decode(event['body']).decode('utf-8')
     else:
-        body_decoded = event['body']
-        
-    payload = json.loads(urllib.parse.parse_qs(body_decoded)['payload'][0])
-    
+        body = event['body']
+
+    slack_signature = event['headers'].get('x-slack-signature', '')
+    slack_timestamp = event['headers'].get('x-slack-request-timestamp', '')
+    slack_signing_secret = os.environ['SLACK_SIGNING_SECRET']
+
+    sig_basestring = f"v0:{slack_timestamp}:{body}"
+    my_signature = "v0=" + hmac.new(
+        slack_signing_secret.encode(),
+        sig_basestring.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(my_signature, slack_signature):
+        return {'statusCode': 400}
+
+    # Get message.
+    payload = json.loads(urllib.parse.parse_qs(body)['payload'][0])
     action = payload['actions'][0]['action_id']
     response_url = payload['response_url']
     channel_id = payload['channel']['id']
     user_id = payload['user']['id']
-    
+
+    # Store action.
+
+
+    # Return response.
     message = {
-        "response_type": "in_channel",  # Message will be visible to everyone in the channel
-        "text": f"<@{user_id}> clicked button {action}!"
+        "response_type": "in_channel", 
+        "text": f"<@{user_id}> clicked button {action}!" #TODO: make into messsages.py, e.g. "User said that you met"
     }
 
     data = json.dumps(message).encode('utf-8')
     req = urllib.request.Request(response_url, data=data, headers={'Content-Type': 'application/json'})
     urllib.request.urlopen(req)
 
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'text': 'No action taken.'})
-    }
+    return {'statusCode': 200}
 
 
 def lambda_handler(event, context):
@@ -131,4 +154,50 @@ def lambda_handler(event, context):
 
 if __name__ == "__main__":
 
-    print(lambda_handler({'source': 'aws.events', 'force_ask_for_engagement': True}, None))
+    event = {
+        'version': '2.0', 
+        'routeKey': '$default', 
+        'rawPath': '/', 
+        'rawQueryString': '', 
+        'headers': {
+            'content-length': '2246', 
+            'x-amzn-tls-version': 'TLSv1.3', 
+            'x-forwarded-proto': 'https', 
+            'x-forwarded-port': '443', 
+            'x-forwarded-for': '54.158.13.6', 
+            'accept': 'application/json,*/*', 
+            'x-amzn-tls-cipher-suite': 'TLS_AES_128_GCM_SHA256', 
+            'x-amzn-trace-id': 'Root=1-66c8d3ef-41f164411192858916a95794', 
+            'host': 'j5pfkapzftf2w3ky7yyiimxfzm0nwqic.lambda-url.us-east-1.on.aws', 
+            'content-type': 'application/x-www-form-urlencoded', 
+            'x-slack-request-timestamp': '1724437487', 
+            'x-slack-signature': 'v0=11fb11cf0bad6cb4c73e08aae32db96b1f157709aa6d18e4292d9fd53dc20da3', 
+            'accept-encoding': 'gzip,deflate', 
+            'user-agent': 'Slackbot 1.0 (+https://api.slack.com/robots)'
+        }, 
+        'requestContext': {
+            'accountId': 'anonymous', 
+            'apiId': 'j5pfkapzftf2w3ky7yyiimxfzm0nwqic', 
+            'domainName': 'j5pfkapzftf2w3ky7yyiimxfzm0nwqic.lambda-url.us-east-1.on.aws', 
+            'domainPrefix': 'j5pfkapzftf2w3ky7yyiimxfzm0nwqic', 
+            'http': {
+                'method': 'POST', 
+                'path': '/', 
+                'protocol': 'HTTP/1.1', 
+                'sourceIp': '54.158.13.6', 
+                'userAgent': 'Slackbot 1.0 (+https://api.slack.com/robots)'
+            }, 
+            'requestId': '2c815d74-bde1-47eb-958a-1163758cd955', 
+            'routeKey': '$default', 
+            'stage': '$default', 
+            'time': '23/Aug/2024:18:24:47 +0000', 
+            'timeEpoch': 1724437487941
+        }, 
+        'body': 'cGF5bG9hZD0lN0IlMjJ0eXBlJTIyJTNBJTIyYmxvY2tfYWN0aW9ucyUyMiUyQyUyMnVzZXIlMjIlM0ElN0IlMjJpZCUyMiUzQSUyMlUwNTFVTFRIRlBDJTIyJTJDJTIydXNlcm5hbWUlMjIlM0ElMjJkYW5pZWwud2l0dmxpZXQlMjIlMkMlMjJuYW1lJTIyJTNBJTIyZGFuaWVsLndpdHZsaWV0JTIyJTJDJTIydGVhbV9pZCUyMiUzQSUyMlQwNTI3OUtKSkU1JTIyJTdEJTJDJTIyYXBpX2FwcF9pZCUyMiUzQSUyMkEwN0Y2RjYxQVA0JTIyJTJDJTIydG9rZW4lMjIlM0ElMjJXcjI1clI5UmtZbFF4cWJncVR5RW9PNXIlMjIlMkMlMjJjb250YWluZXIlMjIlM0ElN0IlMjJ0eXBlJTIyJTNBJTIybWVzc2FnZSUyMiUyQyUyMm1lc3NhZ2VfdHMlMjIlM0ElMjIxNzI0NDM3MDE0LjE2NzcwOSUyMiUyQyUyMmNoYW5uZWxfaWQlMjIlM0ElMjJDMDdKNVIySlU5WiUyMiUyQyUyMmlzX2VwaGVtZXJhbCUyMiUzQWZhbHNlJTdEJTJDJTIydHJpZ2dlcl9pZCUyMiUzQSUyMjc2MDc4NTc4NDM2ODcuNTA3NTMyNTYzMDQ4MS4wZTRiMGYwMzQwODkzODNhNDU2MTc5MTA4NzIwNjkyZSUyMiUyQyUyMnRlYW0lMjIlM0ElN0IlMjJpZCUyMiUzQSUyMlQwNTI3OUtKSkU1JTIyJTJDJTIyZG9tYWluJTIyJTNBJTIyZHdpdHZsaWV0ZGV2JTIyJTdEJTJDJTIyZW50ZXJwcmlzZSUyMiUzQW51bGwlMkMlMjJpc19lbnRlcnByaXNlX2luc3RhbGwlMjIlM0FmYWxzZSUyQyUyMmNoYW5uZWwlMjIlM0ElN0IlMjJpZCUyMiUzQSUyMkMwN0o1UjJKVTlaJTIyJTJDJTIybmFtZSUyMiUzQSUyMnByaXZhdGVncm91cCUyMiU3RCUyQyUyMm1lc3NhZ2UlMjIlM0ElN0IlMjJ1c2VyJTIyJTNBJTIyVTA3RjZHMUVFMTAlMjIlMkMlMjJ0eXBlJTIyJTNBJTIybWVzc2FnZSUyMiUyQyUyMnRzJTIyJTNBJTIyMTcyNDQzNzAxNC4xNjc3MDklMjIlMkMlMjJib3RfaWQlMjIlM0ElMjJCMDdGVkExUjY1TiUyMiUyQyUyMmFwcF9pZCUyMiUzQSUyMkEwN0Y2RjYxQVA0JTIyJTJDJTIydGV4dCUyMiUzQSUyMnRlc3QlMjIlMkMlMjJ0ZWFtJTIyJTNBJTIyVDA1Mjc5S0pKRTUlMjIlMkMlMjJibG9ja3MlMjIlM0ElNUIlN0IlMjJ0eXBlJTIyJTNBJTIyc2VjdGlvbiUyMiUyQyUyMmJsb2NrX2lkJTIyJTNBJTIyQlMlNUMlMkZNSyUyMiUyQyUyMnRleHQlMjIlM0ElN0IlMjJ0eXBlJTIyJTNBJTIybXJrZHduJTIyJTJDJTIydGV4dCUyMiUzQSUyMlRlc3QlMjIlMkMlMjJ2ZXJiYXRpbSUyMiUzQWZhbHNlJTdEJTJDJTIyYWNjZXNzb3J5JTIyJTNBJTdCJTIydHlwZSUyMiUzQSUyMmJ1dHRvbiUyMiUyQyUyMmFjdGlvbl9pZCUyMiUzQSUyMmJ1dHRvbl8xX2NsaWNrJTIyJTJDJTIydGV4dCUyMiUzQSU3QiUyMnR5cGUlMjIlM0ElMjJwbGFpbl90ZXh0JTIyJTJDJTIydGV4dCUyMiUzQSUyMkJ1dHRvbisxJTIyJTJDJTIyZW1vamklMjIlM0F0cnVlJTdEJTdEJTdEJTJDJTdCJTIydHlwZSUyMiUzQSUyMnNlY3Rpb24lMjIlMkMlMjJibG9ja19pZCUyMiUzQSUyMll2VzIyJTIyJTJDJTIydGV4dCUyMiUzQSU3QiUyMnR5cGUlMjIlM0ElMjJtcmtkd24lMjIlMkMlMjJ0ZXh0JTIyJTNBJTIyT3IlMjIlMkMlMjJ2ZXJiYXRpbSUyMiUzQWZhbHNlJTdEJTJDJTIyYWNjZXNzb3J5JTIyJTNBJTdCJTIydHlwZSUyMiUzQSUyMmJ1dHRvbiUyMiUyQyUyMmFjdGlvbl9pZCUyMiUzQSUyMmJ1dHRvbl8yX2NsaWNrJTIyJTJDJTIydGV4dCUyMiUzQSU3QiUyMnR5cGUlMjIlM0ElMjJwbGFpbl90ZXh0JTIyJTJDJTIydGV4dCUyMiUzQSUyMkJ1dHRvbisyJTIyJTJDJTIyZW1vamklMjIlM0F0cnVlJTdEJTdEJTdEJTVEJTdEJTJDJTIyc3RhdGUlMjIlM0ElN0IlMjJ2YWx1ZXMlMjIlM0ElN0IlN0QlN0QlMkMlMjJyZXNwb25zZV91cmwlMjIlM0ElMjJodHRwcyUzQSU1QyUyRiU1QyUyRmhvb2tzLnNsYWNrLmNvbSU1QyUyRmFjdGlvbnMlNUMlMkZUMDUyNzlLSkpFNSU1QyUyRjc2MjQ5MDAxMTQyNDQlNUMlMkZsWnlVYk9DVFAzbkJDVGJXSmVqeWxTb0klMjIlMkMlMjJhY3Rpb25zJTIyJTNBJTVCJTdCJTIyYWN0aW9uX2lkJTIyJTNBJTIyYnV0dG9uXzFfY2xpY2slMjIlMkMlMjJibG9ja19pZCUyMiUzQSUyMkJTJTVDJTJGTUslMjIlMkMlMjJ0ZXh0JTIyJTNBJTdCJTIydHlwZSUyMiUzQSUyMnBsYWluX3RleHQlMjIlMkMlMjJ0ZXh0JTIyJTNBJTIyQnV0dG9uKzElMjIlMkMlMjJlbW9qaSUyMiUzQXRydWUlN0QlMkMlMjJ0eXBlJTIyJTNBJTIyYnV0dG9uJTIyJTJDJTIyYWN0aW9uX3RzJTIyJTNBJTIyMTcyNDQzNzQ4Ny44ODY3NzQlMjIlN0QlNUQlN0Q=', 
+        'isBase64Encoded': True
+    }
+
+    # event = {'source': 'aws.events', 'force_pairing': True}
+    # event = {'source': 'aws.events', 'force_ask_for_engagement': True}
+
+    print(lambda_handler(event, None))
