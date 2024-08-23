@@ -1,5 +1,10 @@
 import os
 import random
+import base64
+import json
+from datetime import datetime
+import urllib.parse
+import urllib.request
 
 from slack_bolt import App
 from slack_sdk import WebClient
@@ -50,7 +55,7 @@ def _pair_users() -> None:
 
         save_matches(channel, paired_users, paired_group_channels)
 
-        # send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users)))
+        send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users)))
 
 
 def _ask_for_engagement() -> None:
@@ -71,25 +76,59 @@ def _ask_for_engagement() -> None:
                 group_channel
             )
 
-@app.action("button_1_click")
-@app.action("button_2_click")
-def handle_button_click(ack, body, client):
-    print(1)
-    ack()
-    client.chat_update(
-        channel=body["channel"]["id"],
-        ts=body["message"]["ts"],
-        text="You clicked a button!",
-        blocks=[]
-    )
-    # Store the button click for later use
-    # store_button_click(body["user"]["id"], body["actions"][0]["action_id"])
+
+def _respond_to_action(event: dict) -> None:
+    if event.get('isBase64Encoded'):
+        body_decoded = base64.b64decode(event['body']).decode('utf-8')
+    else:
+        body_decoded = event['body']
+        
+    payload = json.loads(urllib.parse.parse_qs(body_decoded)['payload'][0])
+    
+    action = payload['actions'][0]['action_id']
+    response_url = payload['response_url']
+    channel_id = payload['channel']['id']
+    user_id = payload['user']['id']
+    
+    message = {
+        "response_type": "in_channel",  # Message will be visible to everyone in the channel
+        "text": f"<@{user_id}> clicked button {action}!"
+    }
+
+    data = json.dumps(message).encode('utf-8')
+    req = urllib.request.Request(response_url, data=data, headers={'Content-Type': 'application/json'})
+    urllib.request.urlopen(req)
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'text': 'No action taken.'})
+    }
+
+
+def lambda_handler(event, context):
+
+    if event.get('source') == 'aws.events':
+        # Scheduled event
+        week = datetime.today().isocalendar().week
+        weekday = datetime.today().isocalendar().weekday
+
+        if (week % 2 and weekday == 1) or event.get('force_pairing'):
+            # Monday.
+            _pair_users()
+
+        if (not week % 2 and weekday == 3) or event.get('force_ask_for_engagement'):
+            # Wednesday.
+            _ask_for_engagement()
+
+        return
+        
+    # Nons-scheduled event.
+    return(_respond_to_action(event))
+
+
+
+
 
 if __name__ == "__main__":
 
-
-    # _pair_users()
-
-    _ask_for_engagement()
-
-    # app.start(port=int(os.environ.get("PORT", 3000)))
+    print(lambda_handler({'source': 'aws.events', 'force_ask_for_engagement': True}, None))
