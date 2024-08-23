@@ -53,11 +53,7 @@ def _pair_users() -> None:
         # send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users)))
 
 
-# Start the app
-if __name__ == "__main__":
-
-
-    # _pair_users()
+def _ask_for_engagement() -> None:
 
     matches = load_matches()
 
@@ -74,5 +70,26 @@ if __name__ == "__main__":
                 ask_if_chat_happened_message(),
                 group_channel
             )
+
+@app.action("button_1_click")
+@app.action("button_2_click")
+def handle_button_click(ack, body, client):
+    print(1)
+    ack()
+    client.chat_update(
+        channel=body["channel"]["id"],
+        ts=body["message"]["ts"],
+        text="You clicked a button!",
+        blocks=[]
+    )
+    # Store the button click for later use
+    # store_button_click(body["user"]["id"], body["actions"][0]["action_id"])
+
+if __name__ == "__main__":
+
+
+    # _pair_users()
+
+    _ask_for_engagement()
 
     # app.start(port=int(os.environ.get("PORT", 3000)))
