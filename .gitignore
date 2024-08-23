@@ -3,3 +3,4 @@
 .direnv/
 .env*
 .envrc*
+.data/

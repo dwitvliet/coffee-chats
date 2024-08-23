@@ -1,7 +1,14 @@
 import os
+import random
+
 from slack_bolt import App
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
+
+from utils.messages import schedule_coffee_chat_message, chats_scheduled_channel_message, ask_if_chat_happened_message
+from utils.models import User, Channel
+from utils.slack_helpers import get_member_channels, get_channel_users, send_group_message, send_channel_message
+from utils.database import save_matches, load_matches
+
 
 # Initialize the Bolt app with your bot token and signing secret
 app = App(
@@ -9,53 +16,63 @@ app = App(
     signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
 )
 
-# Function to get channel members
-def get_channel_members(channel_id: str):
-    try:
-        response = app.client.conversations_members(channel=channel_id)
-        members = response['members']
-        return members
-    except SlackApiError as e:
-        print(f"Error fetching members: {e.response['error']}")
-        return []
+def split_into_pairs(users: list[User]) -> list[list[User]]:
+    random.shuffle(users)
+    pairs = []
+    for i in range(0, len(users) - 1, 2):
+        pairs.append([users[i], users[i+1]])
+    if not len(pairs) % 2:
+        pairs[-1].append(users[-1])
+    return pairs
 
-# Function to list channels
-def list_channels():
-    try:
-        response = app.client.users_conversations(types="public_channel,private_channel", limit=999, exclude_archived=True)
-        channels = response['channels']
-        return channels
-    except SlackApiError as e:
-        print(f"Error fetching channels: {e.response['error']}")
-        return []
 
-def get_user_info(user_id):
-    try:
-        response = app.client.users_info(user=user_id)
-        return response['user']
+def _pair_users() -> None:
+    # Get users to pair.
+    for channel in get_member_channels(app.client):
+        print(channel)
 
-    except SlackApiError as e:
-        print(f"Error fetching member: {e.response['error']}")
-        return None
+        users = get_channel_users(app.client, channel)
+        if len(users) < 2:
+            print('Too few users')
+            continue
 
-# Example usage: Print all channels and members of the first channel
-def print_channels_and_members():
-    channels = list_channels()
-    print("Channels the app is a member of:")
-    for channel in channels:
-        print(f"{channel['name']} (ID: {channel['id']})")
-        
-        members = get_channel_members(channel['id'])
-        print('Members:')
-        for member in members:
-            member_info = get_user_info(member)
-            if member_info['is_bot']:
-                continue
-            print(member_info['name'])
+        paired_users = split_into_pairs(users)
+        print(paired_users)
 
+        paired_group_channels = []
+        for user_pair in paired_users:
+            group_channel = send_group_message(
+                app.client, 
+                ','.join([u.id for u in user_pair]), 
+                schedule_coffee_chat_message(user_pair, channel)
+            )
+            paired_group_channels.append(group_channel)
+
+        save_matches(channel, paired_users, paired_group_channels)
+
+        # send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users)))
 
 
 # Start the app
 if __name__ == "__main__":
-    print_channels_and_members()  # Print channels and members when the app starts
+
+
+    # _pair_users()
+
+    matches = load_matches()
+
+    for channel_id, channel_matches in matches.items():
+        for channel_match in channel_matches:
+            users = channel_match['users']
+            group_channel = channel_match['group_channel']
+
+            print(users, group_channel)
+
+            group_channel = send_group_message(
+                app.client, 
+                ','.join([u.id for u in users]), 
+                ask_if_chat_happened_message(),
+                group_channel
+            )
+
     # app.start(port=int(os.environ.get("PORT", 3000)))
