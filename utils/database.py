@@ -7,19 +7,25 @@ from utils.models import User, Channel
 
 
 def save_matches(channel: Channel, paired_users: list[list[User]], paired_group_channels: list[Channel]) -> None:
-
+    print(1)
     dynamodb = boto3.resource('dynamodb')
+    print(2)
     table = dynamodb.Table('intros')
-    
+    print(3)
     for users, group_channel in zip(paired_users, paired_group_channels):
-    
-        table.put_item(Item={
+        item = {
             'channel': channel.id,
             'date': datetime.today().strftime('%Y-%m-%d'),
             'users': [u.id for u in users],
             'group_channel': group_channel.id,
             'did_meet': False
-        })
+        }
+        
+        print(item)
+        # table.put_item(Item=item)
+        print(5)
+        response = table.put_item(Item=item)
+        print(response)
 
 
 def load_matches() -> dict:
