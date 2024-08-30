@@ -1,5 +1,6 @@
 import json
 import os
+import boto3
 from datetime import datetime
 
 from utils.models import User, Channel
@@ -7,21 +8,18 @@ from utils.models import User, Channel
 
 def save_matches(channel: Channel, paired_users: list[list[User]], paired_group_channels: list[Channel]) -> None:
 
-    today = datetime.today().strftime('%Y-%m-%d')
-    path = f'.data/{today}/'
-    fname = f'{channel.id}.json'
-
-    json_to_save = json.dumps(
-        [{'users': u, 'group_channel': c} for u, c in zip(paired_users, paired_group_channels)], 
-        default=lambda o: o.__dict__,
-        indent=2,
-    )
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table('intros')
     
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-    with open(os.path.join(path, fname), 'w') as f:
-        f.write(json_to_save)
+    for users, group_channel in zip(paired_users, paired_group_channels):
+    
+        table.put_item(Item={
+            'channel': channel.id,
+            'date': datetime.today().strftime('%Y-%m-%d'),
+            'users': [u.id for u in users],
+            'group_channel': group_channel.id,
+            'did_meet': False
+        })
 
 
 def load_matches() -> dict:

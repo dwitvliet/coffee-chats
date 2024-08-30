@@ -3,7 +3,7 @@ def schedule_coffee_chat_message(users, channel) -> dict:
     number = 'two' if len(users) == 2 else 'three'
     return {'text': f'''
 
-Hi! You {number} have been paired this week in <#{channel.id}>! Please set up a calendar invite to have a fun chat!
+Hi, you {number} have been paired this week in <#{channel.id}>! Please set up a calendar invite to have a fun chat!
 
 '''}
 

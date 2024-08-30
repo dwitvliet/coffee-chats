@@ -9,7 +9,7 @@ from datetime import datetime
 import urllib.parse
 import urllib.request
 
-from slack_bolt import App
+from python.slack_bolt import App
 from slack_sdk import WebClient
 
 from utils.messages import schedule_coffee_chat_message, chats_scheduled_channel_message, ask_if_chat_happened_message
