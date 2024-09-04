@@ -1,4 +1,6 @@
 from typing import Optional
+import json
+import urllib.request
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -64,3 +66,10 @@ def send_channel_message(client: WebClient, channel: Channel, message: dict) -> 
 
     except SlackApiError as e:
         print(f"Error sending message: {e.response['error']}")
+
+
+def respond_to_action(response_url: str, message: dict) -> None:
+    data = json.dumps(message).encode('utf-8')
+    req = urllib.request.Request(response_url, data=data, headers={'Content-Type': 'application/json'})
+    urllib.request.urlopen(req)
+    

@@ -104,4 +104,39 @@ def load_matches() -> dict:
     )
     
     return previous_matches['Items']
+
+
+def update_match_did_meet(channel: Channel, group_channel: Channel, did_meet: bool) -> str:
     
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table('intros')
+    
+
+    previous_matches = table.query(
+        IndexName='is_latest_date-channel-index',
+        KeyConditionExpression='is_latest_date = :is_latest_date AND channel = :channel',
+        ExpressionAttributeValues={
+            ':is_latest_date': 1,
+            ':channel': channel.id
+        }
+    )['Items']
+    
+    if not previous_matches:
+        return
+    
+    match = previous_matches[0]
+    table.update_item(
+        Key={
+            'channel': match['channel'],
+            'date': match['date']
+        },
+        UpdateExpression='SET intros.#group_channel.did_meet = :did_meet',
+        ExpressionAttributeNames={
+            '#group_channel': group_channel.id,
+        },
+        ExpressionAttributeValues={
+            ':did_meet': did_meet
+        }
+    )
+    
+    return True

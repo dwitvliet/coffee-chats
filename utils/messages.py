@@ -1,3 +1,4 @@
+from utils.models import User, Channel
 
 def schedule_coffee_chat_message(users, channel) -> dict:
     number = 'two' if len(users) == 2 else 'three'
@@ -21,7 +22,7 @@ Can you get to *100%*? Schedule your intro for this week and find out!
 '''}
 
 
-def ask_if_chat_happened_message() -> dict:
+def ask_if_chat_happened_message(channel: Channel) -> dict:
     return {'blocks': [
         {
             "type": "section",
@@ -39,7 +40,8 @@ def ask_if_chat_happened_message() -> dict:
                         "type": "plain_text",
                         "text": ":white_check_mark: Yes"
                     },
-                    "action_id": "meeting_happened"
+                    "action_id": "meeting_happened",
+                    "value": channel.id
                 },
                 {
                     "type": "button",
@@ -47,7 +49,8 @@ def ask_if_chat_happened_message() -> dict:
                         "type": "plain_text",
                         "text": ":x: No"
                     },
-                    "action_id": "meeting_did_not_happen"
+                    "action_id": "meeting_did_not_happen",
+                    "value": channel.id
                 },
                 {
                     "type": "button",
@@ -55,9 +58,35 @@ def ask_if_chat_happened_message() -> dict:
                         "type": "plain_text",
                         "text": ":calendar: Not yet, but scheduled"
                     },
-                    "action_id": "meeting_will_happen"
+                    "action_id": "meeting_will_happen",
+                    "value": channel.id
 
                 }
             ]
         }
     ], 'text': 'Did you get a chance to connect?'}
+
+
+def message_response_to_action(user: User, action: str) -> dict:
+    
+    message = None
+    
+    if action == 'meeting_happened':
+        message = f'<@{user.id}> said that *you met*. Awesome!'
+        
+    elif action == 'meeting_did_not_happen':
+        message = f'<@{user.id}> said that *you haven\'t met yet*.'
+        
+    elif action == 'meeting_will_happen':
+        message = f'<@{user.id}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
+        
+    elif action == 'expired':
+        message = f'Response button expired.'
+        
+    if not message:
+        return None
+    
+    return {
+        'response_type': 'in_channel', 
+        'text': message
+    }

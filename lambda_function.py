@@ -7,15 +7,30 @@ import hmac
 import time
 from datetime import datetime
 import urllib.parse
-import urllib.request
 
 from slack_bolt import App
 from slack_sdk import WebClient
 
-from utils.messages import schedule_coffee_chat_message, chats_scheduled_channel_message, ask_if_chat_happened_message
 from utils.models import User, Channel
-from utils.slack_helpers import get_member_channels, get_channel_users, get_group_channel, send_channel_message
-from utils.database import save_matches, expire_old_matches, load_matches
+from utils.messages import (
+    schedule_coffee_chat_message, 
+    chats_scheduled_channel_message, 
+    ask_if_chat_happened_message, 
+    message_response_to_action
+)
+from utils.slack_helpers import (
+    get_member_channels, 
+    get_channel_users, 
+    get_group_channel, 
+    send_channel_message,
+    respond_to_action
+)
+from utils.database import (
+    save_matches, 
+    expire_old_matches, 
+    load_matches,
+    update_match_did_meet
+)
 
 
 # Initialize the Bolt app with your bot token and signing secret
@@ -67,14 +82,16 @@ def _ask_for_engagement() -> None:
 
     for match in matches:
         
-        channel_id = match['channel']
+        channel = Channel({'id': match['channel']})
         
-        for group_channel, users in match['intros'].items(): 
+        for group_channel_id, users in match['intros'].items(): 
 
-            group_channel = send_channel_message(
+            group_channel = Channel({'id': group_channel_id})
+            
+            send_channel_message(
                 app.client, 
-                Channel({'id': group_channel}),
-                ask_if_chat_happened_message()
+                group_channel,
+                ask_if_chat_happened_message(channel)
             )
 
 
@@ -107,21 +124,21 @@ def _respond_to_action(event: dict) -> None:
     payload = json.loads(urllib.parse.parse_qs(body)['payload'][0])
     action = payload['actions'][0]['action_id']
     response_url = payload['response_url']
-    channel_id = payload['channel']['id']
-    user_id = payload['user']['id']
+    
+    channel = Channel({'id': payload['actions'][0]['value']})
+    group_channel = Channel({'id': payload['channel']['id']})
+    user = User({'id': payload['user']['id']})
 
     # Store action.
-
+    did_meet = action in ('meeting_happened', 'meeting_will_happen')
+    update_success = update_match_did_meet(channel, group_channel, did_meet)
+    if not update_success:
+        action = 'expired'
 
     # Return response.
-    message = {
-        "response_type": "in_channel", 
-        "text": f"<@{user_id}> clicked button {action}!" #TODO: make into messsages.py, e.g. "User said that you met"
-    }
-
-    data = json.dumps(message).encode('utf-8')
-    req = urllib.request.Request(response_url, data=data, headers={'Content-Type': 'application/json'})
-    urllib.request.urlopen(req)
+    response_message = message_response_to_action(user, action)
+    if response_message:
+        respond_to_action(response_url, response_message)
 
     return {'statusCode': 200}
 
