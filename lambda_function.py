@@ -14,8 +14,8 @@ from slack_sdk import WebClient
 
 from utils.messages import schedule_coffee_chat_message, chats_scheduled_channel_message, ask_if_chat_happened_message
 from utils.models import User, Channel
-from utils.slack_helpers import get_member_channels, get_channel_users, send_group_message, send_channel_message
-from utils.database import save_matches, load_matches
+from utils.slack_helpers import get_member_channels, get_channel_users, get_group_channel, send_channel_message
+from utils.database import save_matches, expire_old_matches, load_matches
 
 
 # Initialize the Bolt app with your bot token and signing secret
@@ -49,34 +49,32 @@ def _pair_users() -> None:
 
         paired_group_channels = []
         for user_pair in paired_users:
-            group_channel = send_group_message(
-                app.client, 
-                ','.join([u.id for u in user_pair]), 
-                schedule_coffee_chat_message(user_pair, channel)
-            )
-            paired_group_channels.append(group_channel)
+            paired_group_channels.append(get_group_channel(app.client, ','.join([u.id for u in user_pair])))
 
         save_matches(channel, paired_users, paired_group_channels)
+
+        for user_pair, group_channel in zip(paired_users, paired_group_channels):
+            send_channel_message(app.client, group_channel, schedule_coffee_chat_message(user_pair, channel))
 
         send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users)))
 
 
 def _ask_for_engagement() -> None:
+    
+    expire_old_matches()
 
     matches = load_matches()
 
-    for channel_id, channel_matches in matches.items():
-        for channel_match in channel_matches:
-            users = channel_match['users']
-            group_channel = channel_match['group_channel']
+    for match in matches:
+        
+        channel_id = match['channel']
+        
+        for group_channel, users in match['intros'].items(): 
 
-            print(users, group_channel)
-
-            group_channel = send_group_message(
+            group_channel = send_channel_message(
                 app.client, 
-                ','.join([u.id for u in users]), 
-                ask_if_chat_happened_message(),
-                group_channel
+                Channel({'id': group_channel}),
+                ask_if_chat_happened_message()
             )
 
 
@@ -139,7 +137,7 @@ def lambda_handler(event, context):
             # Monday.
             _pair_users()
 
-        if (not week % 2 and weekday == 3) or event.get('force_ask_for_engagement'):
+        elif (not week % 2 and weekday == 3) or event.get('force_ask_for_engagement'):
             # Wednesday.
             _ask_for_engagement()
 

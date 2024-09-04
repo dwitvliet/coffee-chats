@@ -49,19 +49,14 @@ def get_channel_users(client: WebClient, channel: Channel) -> list[User]:
     return users
 
 
-def send_group_message(client: WebClient, user_ids: list[str], message: dict, group_channel: Optional[Channel] = None) -> Channel:
+def get_group_channel(client: WebClient, user_ids: list[str]) -> Channel:
     try:
-        if group_channel is None:
-            response = client.conversations_open(users=user_ids)
-            group_channel = Channel(response['channel'])
-
-        client.chat_postMessage(channel=group_channel.id, **message)
-
-        return group_channel
+        response = client.conversations_open(users=user_ids)
+        return Channel(response['channel'])
 
     except SlackApiError as e:
         print(f"Error sending message: {e.response['error']}")
-
+    
 
 def send_channel_message(client: WebClient, channel: Channel, message: dict) -> None:
     try:
