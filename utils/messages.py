@@ -1,25 +1,29 @@
+from typing import Optional
+
 from utils.models import User, Channel
+
 
 def schedule_coffee_chat_message(users, channel) -> dict:
     number = 'two' if len(users) == 2 else 'three'
-    return {'text': f'''
-
-Hi, you {number} have been paired this week in <#{channel.id}>! Please set up a calendar invite to have a fun chat!
-
-'''}
+    return {'text': f'''Hi, you {number} have been paired this week in <#{channel.id}>! Please set up a calendar invite to have a fun chat!'''}
 
 
-def chats_scheduled_channel_message(n_pairs: int) -> dict:
+def chats_scheduled_channel_message(n_pairs: int, previous_intros_stats: Optional[dict] = None) -> dict:
+    
+    message = f'''*{n_pairs}* intros have just been sent out!'''
+    
+    if previous_intros_stats:
+        intros_count = previous_intros_stats['intros_count']
+        meetings_count = previous_intros_stats['meetings_count']
+        pct_met = round(meetings_count / intros_count * 100)
+        message += f'''\n\nLast round, *{meetings_count}* of *{intros_count}* groups met. That's *{pct_met}%* of intros made!'''
 
-    return {'text': f'''
+        if pct_met < 100:
+            message += '\n\nCan you get to *100%*? Schedule your intro for this week and find out!'
+        else:
+            message += '\n\nKeep up the momentum! Don\'t forget to schedule your intro for this week!'
 
-*{n_pairs}* intros have just been sent out!
-
-Last round, *6* of *12* groups met. That's *50%* of intros made!
-
-Can you get to *100%*? Schedule your intro for this week and find out!
-
-'''}
+    return {'text': message}
 
 
 def ask_if_chat_happened_message(channel: Channel) -> dict:

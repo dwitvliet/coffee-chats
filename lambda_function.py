@@ -7,6 +7,7 @@ import hmac
 import time
 from datetime import datetime
 import urllib.parse
+import logging
 
 from slack_bolt import App
 from slack_sdk import WebClient
@@ -44,34 +45,45 @@ def split_into_pairs(users: list[User]) -> list[list[User]]:
     pairs = []
     for i in range(0, len(users) - 1, 2):
         pairs.append([users[i], users[i+1]])
-    if not len(pairs) % 2:
+    if len(users) % 2:
         pairs[-1].append(users[-1])
     return pairs
 
 
 def _pair_users() -> None:
+
     # Get users to pair.
     for channel in get_member_channels(app.client):
-        print(channel)
+        logging.info(f'Pairing users in {channel}')
 
         users = get_channel_users(app.client, channel)
         if len(users) < 2:
-            print('Too few users')
+            logging.warning('Too few users')
             continue
 
         paired_users = split_into_pairs(users)
-        print(paired_users)
-
+        
         paired_group_channels = []
         for user_pair in paired_users:
             paired_group_channels.append(get_group_channel(app.client, ','.join([u.id for u in user_pair])))
 
-        save_matches(channel, paired_users, paired_group_channels)
+
+        previous_intros_stats = None
+        previous_matches = load_matches(channel)
+        if previous_matches:
+            previous_intros_stats = {
+                'intros_count': len(previous_matches[0]['intros']),
+                'meetings_count': sum([m['did_meet'] for m in previous_matches[0]['intros'].values()])
+            }
+            
+        matches_was_saved = save_matches(channel, paired_users, paired_group_channels)
+        if not matches_was_saved:
+            continue
 
         for user_pair, group_channel in zip(paired_users, paired_group_channels):
             send_channel_message(app.client, group_channel, schedule_coffee_chat_message(user_pair, channel))
 
-        send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users)))
+        send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))
 
 
 def _ask_for_engagement() -> None:
@@ -160,6 +172,6 @@ def lambda_handler(event, context):
 
         return
         
-    # Nons-scheduled event.
+    # Non-scheduled event.
     return(_respond_to_action(event))
 

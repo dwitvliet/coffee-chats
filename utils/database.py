@@ -8,7 +8,7 @@ from typing import Optional
 from utils.models import User, Channel
 
 
-def save_matches(channel: Channel, paired_users: list[list[User]], paired_group_channels: list[Channel]) -> None:
+def save_matches(channel: Channel, paired_users: list[list[User]], paired_group_channels: list[Channel]) -> bool:
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table('intros')
     date = datetime.today().strftime('%Y-%m-%d')
@@ -43,7 +43,7 @@ def save_matches(channel: Channel, paired_users: list[list[User]], paired_group_
         
         if previous_match[0]['date'] == date:
             logging.warning(f'Already had a match today for f{channel} - skipping.')
-            return
+            return False
 
         table.update_item(
             Key={
@@ -56,6 +56,8 @@ def save_matches(channel: Channel, paired_users: list[list[User]], paired_group_
     
     
     table.put_item(Item=record_to_insert) 
+    
+    return True
 
 
 def expire_old_matches() -> None:
@@ -90,18 +92,29 @@ def expire_old_matches() -> None:
             )
 
 
-def load_matches() -> dict:
+def load_matches(channel: Optional[Channel] = None) -> list:
     
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table('intros')
 
-    previous_matches = table.query(
-        IndexName='is_latest_date-channel-index',
-        KeyConditionExpression='is_latest_date = :is_latest_date',
-        ExpressionAttributeValues={
-            ':is_latest_date': 1,
-        }
-    )
+    if channel:
+        previous_matches = table.query(
+            IndexName='is_latest_date-channel-index',
+            KeyConditionExpression='is_latest_date = :is_latest_date AND channel = :channel',
+            ExpressionAttributeValues={
+                ':is_latest_date': 1,
+                ':channel': channel.id
+            }
+        )
+        
+    else:
+        previous_matches = table.query(
+            IndexName='is_latest_date-channel-index',
+            KeyConditionExpression='is_latest_date = :is_latest_date',
+            ExpressionAttributeValues={
+                ':is_latest_date': 1,
+            }
+        )
     
     return previous_matches['Items']
 

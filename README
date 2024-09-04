@@ -6,5 +6,4 @@ Create table `intros` with partition column `channel` and sort column `date`.
 Create index `is_latest_date-channel-index` with partition column `is_latest_date` and sort column `channel`.
 
 Todo:
-- Make summary stats on event creation
 - Kick users if inactive twice in a row
