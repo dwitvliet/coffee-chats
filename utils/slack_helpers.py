@@ -79,7 +79,45 @@ def send_message(client: WebClient, channel: str, message: dict) -> None:
         logging.error(f"Error sending message: {e.response['error']}")
 
 
+def authenticate_new_install(code):
+    
+    url = 'https://slack.com/api/oauth.v2.access'
+    params = {
+        'client_id': os.environ.get("SLACK_CLIENT_ID"),
+        'client_secret': os.environ.get("SLACK_CLIENT_SECRET"),
+        'code': code,
+        'redirect_uri': os.environ.get("FUNCTION_URL")
+    }
+
+    data = urllib.parse.urlencode(params).encode('utf-8')
+    req = urllib.request.Request(url, data=data, method='POST')
+    
+    with urllib.request.urlopen(req) as response:
+        result = json.loads(response.read().decode('utf-8'))
+        
+    if not result.get('ok', False):
+        return {'authentication': 'Authentification failed'}
+
+    return {
+        'authentication': 'Authentification successful',
+        'team_id': result['team']['id'],
+        'access_token': result['access_token']
+    }
+
+
 def process_http_call(event: dict) -> dict:
+    
+    if 'http' not in event.get('requestContext', {}):
+        return 
+    
+    # Authenticate new app install.
+    if event['requestContext']['http'].get('method') == 'GET':
+        parsed_query = urllib.parse.parse_qs(event['rawQueryString'])
+        code = event.get('queryStringParameters', {}).get('code', None)
+        if not code:
+            return
+        
+        return authenticate_new_install(code)
 
     # Check that request was sent from the slack application.
     if 'headers' not in event or 'body' not in event:

@@ -4,8 +4,9 @@ Lambda:
 
 - Run `pip install slack_bolt -t .`.
 - Zip repo and upload to Lambda.
-- Add environmental variables `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` from slack app.
-- Run `curl -X POST https://slack.com/api/auth.test \-H "Authorization: Bearer xoxb-your-oauth-token"` and add the team id as an enviromental variable `SLACK_TEAM_ID`.
+- Add environmental variables `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and `SLACK_SIGNING_SECRET` from the slack app.
+- Add environmental variable `FUNCTION_URL` from Lambda.
+- Add environmental variable `SLACK_TEAM_ID` (see `access_tokens` table after authentification).
 
 Triggers:
 
@@ -15,3 +16,5 @@ Dynamodb:
 
 - Create table `intros` with partition column `channel` and sort column `date`.
 - Create index `is_latest_date-channel-index` with partition column `is_latest_date` and sort column `channel`.
+- Create table `access_tokens` with partition column `team`.
+- Create table `paused_users` with partition column `channel` and sort column `user`.

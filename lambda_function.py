@@ -20,11 +20,14 @@ from utils.slack_helpers import (
 
 
 # Initialize the Bolt app with your bot token and signing secret
+db = Database()
+access_token = db.get_access_token(os.environ.get("SLACK_TEAM_ID"))
+
 app = App(
-    token=os.environ.get("SLACK_BOT_TOKEN"),
+    token=access_token,
     signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
 )
-db = Database()
+
 
 def split_into_pairs(users: list[str]) -> list[list[str]]:
     random.shuffle(users)
@@ -124,6 +127,13 @@ def _respond_to_action(event: dict) -> None:
     if not event_body:
         return {'statusCode': 400}
     
+    # New install authentification.
+    if 'authentication' in event_body:
+        if event_body['authentication'] == 'Authentification successful':
+            db.save_access_token(event_body['team_id'], event_body['access_token'])
+            
+        return {'statusCode': 200, 'body': event_body['authentication']}
+        
     # Button clicks.
     if event_body.get('type') == 'block_actions':
         action = event_body['actions'][0]['action_id']
@@ -178,13 +188,12 @@ def _respond_to_action(event: dict) -> None:
             respond_to_http_call(response_url, response_message, 'ephemeral')
         
         return {'statusCode': 200}
-        
-        
 
     return {'statusCode': 400}
 
-def lambda_handler(event, context):
 
+def lambda_handler(event, context):
+    
     if event.get('source') == 'aws.events':
         # Scheduled event
         week = datetime.today().isocalendar().week

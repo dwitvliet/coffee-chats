@@ -7,6 +7,7 @@ class Database(object):
     
     def __init__(self):
         self.dynamodb = boto3.resource('dynamodb')
+        self.access_tokens = self.dynamodb.Table('access_tokens')
         self.intros = self.dynamodb.Table('intros')
         self.paused_users = self.dynamodb.Table('paused_users')
     
@@ -36,6 +37,23 @@ class Database(object):
             UpdateExpression='SET is_active = :is_active',
             ExpressionAttributeValues={':is_active': 0}
         )
+        
+    def save_access_token(self, team: str, access_token: str):
+        self.access_tokens.put_item(Item={
+            'team': team,
+            'token': access_token
+        }) 
+        
+    def get_access_token(self, team: str) -> str:
+        items = self.access_tokens.query(
+            KeyConditionExpression='team = :team',
+            ExpressionAttributeValues={
+                ':team': team
+            }
+        )['Items']
+        if items:
+            return items[0]['token']
+
 
     def save_intros(self, channel: str, paired_users: list[list[str]], paired_group_channels: list[str]) -> bool:
         table = self.intros
