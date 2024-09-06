@@ -5,7 +5,6 @@ import logging
 from collections import defaultdict
 
 from slack_bolt import App
-from slack_sdk import WebClient
 
 from utils.messages import chats_scheduled_channel_message, ask_if_chat_happened_message
 from utils.database import Database
@@ -141,7 +140,7 @@ def _respond_to_action(event: dict) -> None:
         # Return response.
         response_message = None
         if not update_success:
-            response_message = f'Response button expired.'
+            response_message = 'Response button expired.'
         elif action == 'meeting_happened':
             response_message = f'<@{user}> said that *you met*. Awesome!'
         elif action == 'meeting_did_not_happen':

@@ -1,5 +1,3 @@
-import json
-import os
 import boto3
 import logging
 from datetime import datetime, timedelta
@@ -11,15 +9,52 @@ class Database(object):
         self.dynamodb = boto3.resource('dynamodb')
         self.intros = self.dynamodb.Table('intros')
         self.paused_users = self.dynamodb.Table('paused_users')
-        
+    
+    
+    def _get_active_intros(self, channel: Optional[str] = None) -> list[dict]:
+        query = dict(
+            IndexName='is_active-channel-index',
+            KeyConditionExpression='is_active = :is_active',
+            ExpressionAttributeValues={
+                ':is_active': 1,
+            }
+        )
+
+        if channel:
+            query['KeyConditionExpression'] += ' AND channel = :channel'
+            query['KeyConditionExpression'][':channel'] = channel
+
+        return self.intros.query(**query)['Items']
+    
+
+    def _expire_intro(self, channel: str, date: str) -> None:
+        self.intros.update_item(
+            Key={
+                'channel': channel,
+                'date': date
+            },
+            UpdateExpression='SET is_active = :is_active',
+            ExpressionAttributeValues={':is_active': 0}
+        )
 
     def save_intros(self, channel: str, paired_users: list[list[str]], paired_group_channels: list[str]) -> bool:
-        
         table = self.intros
         current_date = datetime.today().strftime('%Y-%m-%d')
         
-        # Create record to insert.
-        record_to_insert = {
+        # Set previous intros as inactive.
+        active_intro = self._get_active_intros(channel)
+        
+        if active_intro:
+            active_intro_date = active_intro[0]['date']
+            
+            if active_intro_date == current_date:
+                logging.warning(f'Already had a match today for f{channel} - skipping.')
+                return False
+            
+            self._expire_intro(channel, active_intro_date)
+        
+        # Insert new intro record.
+        table.put_item(Item={
             'channel': channel,
             'date': current_date,
             'is_active': 1,
@@ -30,77 +65,20 @@ class Database(object):
                 }
                 for users, group_channel in zip(paired_users, paired_group_channels)
             }
-        }
-        
-        # Set previous intros as inactive.
-        active_intro = table.query(
-            IndexName='is_active-channel-index',
-            KeyConditionExpression='is_active = :is_active AND channel = :channel',
-            ExpressionAttributeValues={
-                ':is_active': 1,
-                ':channel': channel
-                
-            }
-        )['Items']
-        
-        
-        if active_intro:
-            
-            active_intro_date = active_intro[0]['date']
-            
-            if active_intro_date == current_date:
-                logging.warning(f'Already had a match today for f{channel} - skipping.')
-                return False
-    
-            table.update_item(
-                Key={
-                    'channel': channel,
-                    'date': active_intro_date
-                },
-                UpdateExpression='SET is_active = :is_active',
-                ExpressionAttributeValues={':is_active': 0}
-            )
-        
-        
-        table.put_item(Item=record_to_insert) 
+        }) 
         
         return True
 
 
     def expire_old_intros(self) -> None:
-        table = self.intros
-        
-        previous_intros = table.query(
-            IndexName='is_active-channel-index',
-            KeyConditionExpression='is_active = :is_active',
-            ExpressionAttributeValues={
-                ':is_active': 1,
-            }
-        )['Items']
-        
-        for match in previous_intros:
-            expire_match = False
-            if datetime.now() - datetime.fromisoformat(match['date']) > timedelta(days=14):
-                expire_match = True
-            elif any([m['happened'] for m in match['intros'].values()]):
-                expire_match = True
-                
-            if expire_match:
-                
-                table.update_item(
-                    Key={
-                        'channel': match['channel'],
-                        'date': match['date']
-                    },
-                    UpdateExpression='SET is_active = :is_active',
-                    ExpressionAttributeValues={':is_active': 0}
-                )
+        previous_intros = self._get_active_intros()
+        for intro in previous_intros:
+            if datetime.now() - datetime.fromisoformat(intro['date']) > timedelta(days=14):
+                self._expire_intro(intro['channel'], intro['date'])
 
 
-    def load_recent_intros(self, channel: Optional[str] = None) -> list:
-        table = self.intros
-    
-        return table.query(
+    def load_recent_intros(self, channel) -> list:
+        return self.intros.query(
             KeyConditionExpression='channel = :channel',
             ExpressionAttributeValues={
                 ':channel': channel
@@ -111,34 +89,16 @@ class Database(object):
 
 
     def load_active_intros(self) -> list:
-        table = self.intros
-    
-        return table.query(
-            IndexName='is_active-channel-index',
-            KeyConditionExpression='is_active = :is_active',
-            ExpressionAttributeValues={
-                ':is_active': 1,
-            }
-        )['Items']
+        return self._get_active_intros()
 
 
     def update_intro_happened(self, channel: str, group_channel: str, happened: bool) -> str:
-        table = self.intros
-
-        previous_intros = table.query(
-            IndexName='is_active-channel-index',
-            KeyConditionExpression='is_active = :is_active AND channel = :channel',
-            ExpressionAttributeValues={
-                ':is_active': 1,
-                ':channel': channel
-            }
-        )['Items']
-        
+        previous_intros = self._get_active_intros(channel)
         if not previous_intros:
             return
         
         match = previous_intros[0]
-        table.update_item(
+        self.intros.update_item(
             Key={
                 'channel': match['channel'],
                 'date': match['date']
@@ -156,30 +116,24 @@ class Database(object):
 
 
     def pause_intros(self, channel: str, user: str):
-        table = self.paused_users
-    
-        table.put_item(Item={
+        self.paused_users.put_item(Item={
             'channel': channel,
             'user': user
         }) 
     
     def resume_intros(self, channel: str, user: str):
-        table = self.paused_users
-    
-        table.delete_item(Key={
+        self.paused_users.delete_item(Key={
             'channel': channel,
             'user': user
         }) 
     
     def get_paused_intros(self, channel: str):
-        table = self.paused_users
-    
-        items = table.query(
+        items = self.paused_users.query(
             KeyConditionExpression='channel = :channel',
             ExpressionAttributeValues={
                 ':channel': channel
             }
         )['Items']
-        
+
         return [i['user'] for i in items]
     

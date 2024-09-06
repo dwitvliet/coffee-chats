@@ -3,11 +3,9 @@ import json
 import base64
 import hashlib
 import hmac
-import time
 import urllib.request
 import urllib.parse
 import logging
-from typing import Optional
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
