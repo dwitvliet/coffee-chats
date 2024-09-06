@@ -7,12 +7,8 @@ from collections import defaultdict
 from slack_bolt import App
 from slack_sdk import WebClient
 
-from utils.messages import (
-    schedule_coffee_chat_message, 
-    chats_scheduled_channel_message, 
-    ask_if_chat_happened_message, 
-    message_response_to_action
-)
+from utils.messages import chats_scheduled_channel_message, ask_if_chat_happened_message
+from utils.database import Database
 from utils.slack_helpers import (
     get_member_channels,
     get_channel_info,
@@ -22,7 +18,6 @@ from utils.slack_helpers import (
     process_http_call,
     respond_to_http_call
 )
-from utils.database import Database
 
 
 # Initialize the Bolt app with your bot token and signing secret
@@ -96,7 +91,11 @@ def _pair_users() -> None:
             continue
 
         for user_pair, group_channel in zip(paired_users, paired_group_channels):
-            send_message(app.client, group_channel, schedule_coffee_chat_message(user_pair, channel))
+            user_pair_count = 'two' if len(user_pair) == 2 else 'three'
+            schedule_coffee_chat_message = {
+                'text': f'Hi, you {user_pair_count} have been paired this week in <#{channel}>! Please set up a calendar invite to have a fun chat!'
+            }
+            send_message(app.client, group_channel, schedule_coffee_chat_message)
 
         send_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))
 
@@ -138,13 +137,20 @@ def _respond_to_action(event: dict) -> None:
         # Store action.
         happened = action in ('meeting_happened', 'meeting_will_happen')
         update_success = db.update_intro_happened(channel, group_channel, happened)
-        if not update_success:
-            action = 'expired'
-    
+        
         # Return response.
-        response_message = message_response_to_action(user, action)
+        response_message = None
+        if not update_success:
+            response_message = f'Response button expired.'
+        elif action == 'meeting_happened':
+            response_message = f'<@{user}> said that *you met*. Awesome!'
+        elif action == 'meeting_did_not_happen':
+            response_message = f'<@{user}> said that *you haven\'t met yet*.'
+        elif action == 'meeting_will_happen':
+            response_message = f'<@{user}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
+
         if response_message:
-            respond_to_http_call(response_url, response_message)
+            respond_to_http_call(response_url, response_message, 'in_channel')
 
         return {'statusCode': 200}
         
@@ -161,19 +167,16 @@ def _respond_to_action(event: dict) -> None:
         response_message = None
         if not channel_info.get('is_member'):
             response_message = f'{command} only works in channels that I have been added to!'
-        
-        if channel_info.get('is_member'):
-            if command == '/coffee_pause':
-                db.pause_intros(channel, user)
-                response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_resume` here at any time.'
-            
-            elif command == '/coffee_resume':
-                db.resume_intros(channel, user)
-                response_message = f'Intros have been resumed for you in <#{channel}>. You will be included in the next round of intros!'
+        elif command == '/coffee_pause':
+            db.pause_intros(channel, user)
+            response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_resume` here at any time.'
+        elif command == '/coffee_resume':
+            db.resume_intros(channel, user)
+            response_message = f'Intros have been resumed for you in <#{channel}>. You will be included in the next round of intros!'
                 
         
         if response_message:
-            respond_to_http_call(response_url, {'response_type': 'ephemeral', 'text': response_message})
+            respond_to_http_call(response_url, response_message, 'ephemeral')
         
         return {'statusCode': 200}
         

@@ -1,11 +1,6 @@
 from typing import Optional
 
 
-def schedule_coffee_chat_message(users, channel) -> dict:
-    number = 'two' if len(users) == 2 else 'three'
-    return {'text': f'''Hi, you {number} have been paired this week in <#{channel}>! Please set up a calendar invite to have a fun chat!'''}
-
-
 def chats_scheduled_channel_message(n_pairs: int, previous_intros_stats: Optional[dict] = None) -> dict:
     
     message = f'''*{n_pairs}* intros have just been sent out!'''
@@ -67,28 +62,3 @@ def ask_if_chat_happened_message(channel: str) -> dict:
             ]
         }
     ], 'text': 'Did you get a chance to connect?'}
-
-
-def message_response_to_action(user: str, action: str) -> dict:
-    
-    message = None
-    
-    if action == 'meeting_happened':
-        message = f'<@{user}> said that *you met*. Awesome!'
-        
-    elif action == 'meeting_did_not_happen':
-        message = f'<@{user}> said that *you haven\'t met yet*.'
-        
-    elif action == 'meeting_will_happen':
-        message = f'<@{user}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
-        
-    elif action == 'expired':
-        message = f'Response button expired.'
-        
-    if not message:
-        return None
-    
-    return {
-        'response_type': 'in_channel', 
-        'text': message
-    }

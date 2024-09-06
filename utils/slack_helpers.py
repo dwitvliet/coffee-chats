@@ -115,8 +115,11 @@ def process_http_call(event: dict) -> dict:
     return parsed_body
 
 
-def respond_to_http_call(response_url: str, message: dict) -> None:
-    data = json.dumps(message).encode('utf-8')
+def respond_to_http_call(response_url: str, message: str, response_type: str) -> None:
+    data = json.dumps({
+        'response_type': response_type,
+        'text': message,
+    }).encode('utf-8')
     req = urllib.request.Request(response_url, data=data, headers={'Content-Type': 'application/json'})
     urllib.request.urlopen(req)
     
