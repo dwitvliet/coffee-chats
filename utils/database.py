@@ -22,7 +22,7 @@ class Database(object):
 
         if channel:
             query['KeyConditionExpression'] += ' AND channel = :channel'
-            query['KeyConditionExpression'][':channel'] = channel
+            query['ExpressionAttributeValues'][':channel'] = channel
 
         return self.intros.query(**query)['Items']
     
