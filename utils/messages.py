@@ -1,11 +1,9 @@
 from typing import Optional
 
-from utils.models import User, Channel
-
 
 def schedule_coffee_chat_message(users, channel) -> dict:
     number = 'two' if len(users) == 2 else 'three'
-    return {'text': f'''Hi, you {number} have been paired this week in <#{channel.id}>! Please set up a calendar invite to have a fun chat!'''}
+    return {'text': f'''Hi, you {number} have been paired this week in <#{channel}>! Please set up a calendar invite to have a fun chat!'''}
 
 
 def chats_scheduled_channel_message(n_pairs: int, previous_intros_stats: Optional[dict] = None) -> dict:
@@ -26,7 +24,7 @@ def chats_scheduled_channel_message(n_pairs: int, previous_intros_stats: Optiona
     return {'text': message}
 
 
-def ask_if_chat_happened_message(channel: Channel) -> dict:
+def ask_if_chat_happened_message(channel: str) -> dict:
     return {'blocks': [
         {
             "type": "section",
@@ -45,7 +43,7 @@ def ask_if_chat_happened_message(channel: Channel) -> dict:
                         "text": ":white_check_mark: Yes"
                     },
                     "action_id": "meeting_happened",
-                    "value": channel.id
+                    "value": channel
                 },
                 {
                     "type": "button",
@@ -54,7 +52,7 @@ def ask_if_chat_happened_message(channel: Channel) -> dict:
                         "text": ":x: No"
                     },
                     "action_id": "meeting_did_not_happen",
-                    "value": channel.id
+                    "value": channel
                 },
                 {
                     "type": "button",
@@ -63,7 +61,7 @@ def ask_if_chat_happened_message(channel: Channel) -> dict:
                         "text": ":calendar: Not yet, but scheduled"
                     },
                     "action_id": "meeting_will_happen",
-                    "value": channel.id
+                    "value": channel
 
                 }
             ]
@@ -71,18 +69,18 @@ def ask_if_chat_happened_message(channel: Channel) -> dict:
     ], 'text': 'Did you get a chance to connect?'}
 
 
-def message_response_to_action(user: User, action: str) -> dict:
+def message_response_to_action(user: str, action: str) -> dict:
     
     message = None
     
     if action == 'meeting_happened':
-        message = f'<@{user.id}> said that *you met*. Awesome!'
+        message = f'<@{user}> said that *you met*. Awesome!'
         
     elif action == 'meeting_did_not_happen':
-        message = f'<@{user.id}> said that *you haven\'t met yet*.'
+        message = f'<@{user}> said that *you haven\'t met yet*.'
         
     elif action == 'meeting_will_happen':
-        message = f'<@{user.id}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
+        message = f'<@{user}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
         
     elif action == 'expired':
         message = f'Response button expired.'

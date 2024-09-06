@@ -1,18 +1,12 @@
 import os
 import random
-import base64
-import json
-import hashlib
-import hmac
-import time
 from datetime import datetime
-import urllib.parse
 import logging
+from collections import defaultdict
 
 from slack_bolt import App
 from slack_sdk import WebClient
 
-from utils.models import User, Channel
 from utils.messages import (
     schedule_coffee_chat_message, 
     chats_scheduled_channel_message, 
@@ -20,18 +14,15 @@ from utils.messages import (
     message_response_to_action
 )
 from utils.slack_helpers import (
-    get_member_channels, 
+    get_member_channels,
+    get_channel_info,
     get_channel_users, 
     get_group_channel, 
-    send_channel_message,
-    respond_to_action
+    send_message,
+    process_http_call,
+    respond_to_http_call
 )
-from utils.database import (
-    save_matches, 
-    expire_old_matches, 
-    load_matches,
-    update_match_did_meet
-)
+from utils.database import Database
 
 
 # Initialize the Bolt app with your bot token and signing secret
@@ -39,8 +30,9 @@ app = App(
     token=os.environ.get("SLACK_BOT_TOKEN"),
     signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
 )
+db = Database()
 
-def split_into_pairs(users: list[User]) -> list[list[User]]:
+def split_into_pairs(users: list[str]) -> list[list[str]]:
     random.shuffle(users)
     pairs = []
     for i in range(0, len(users) - 1, 2):
@@ -52,55 +44,76 @@ def split_into_pairs(users: list[User]) -> list[list[User]]:
 
 def _pair_users() -> None:
 
-    # Get users to pair.
     for channel in get_member_channels(app.client):
         logging.info(f'Pairing users in {channel}')
 
+        # Get users to pair.
         users = get_channel_users(app.client, channel)
+        paused_users = db.get_paused_intros(channel)
+        users = [u for u in users if u not in paused_users]
+
+        # Calculate stats for previous intro.
+        recent_intros = db.load_recent_intros(channel)
+        if recent_intros and recent_intros[0]['is_active']:
+            previous_intros_stats = {
+                'intros_count': len(recent_intros[0]['intros']),
+                'meetings_count': sum([m['happened'] for m in recent_intros[0]['intros'].values()])
+            }
+        else:
+            previous_intros_stats = None
+            
+        # Determine which users need to be skipped due to inactivity.
+        missed_intros = defaultdict(int)
+        for round in recent_intros:
+            for intro in round['intros'].values():
+                if intro['happened']:
+                    continue
+                for user in intro['users']:
+                    missed_intros[user] += 1
+        
+        skipped_users = []
+        for user in users:
+            if missed_intros[user] >= 2:
+                db.pause_intros(channel, user)
+                send_message(app.client, user, {'text': f'Intros have been paused for you in <#{channel}> due to inactivity (missing your last two intros). To be included in the next round of intros, run `/coffee_resume` in the channel at any time.'})
+                skipped_users.append(user)
+                
+        users = [u for u in users if u not in skipped_users]
+                
+        # Randomize users.
         if len(users) < 2:
             logging.warning('Too few users')
             continue
-
         paired_users = split_into_pairs(users)
         
+        # Send intro messages.
         paired_group_channels = []
         for user_pair in paired_users:
-            paired_group_channels.append(get_group_channel(app.client, ','.join([u.id for u in user_pair])))
+            paired_group_channels.append(get_group_channel(app.client, ','.join(user_pair)))
 
-
-        previous_intros_stats = None
-        previous_matches = load_matches(channel)
-        if previous_matches:
-            previous_intros_stats = {
-                'intros_count': len(previous_matches[0]['intros']),
-                'meetings_count': sum([m['did_meet'] for m in previous_matches[0]['intros'].values()])
-            }
-            
-        matches_was_saved = save_matches(channel, paired_users, paired_group_channels)
-        if not matches_was_saved:
+        intros_were_saved = db.save_intros(channel, paired_users, paired_group_channels)
+        if not intros_were_saved:
             continue
 
         for user_pair, group_channel in zip(paired_users, paired_group_channels):
-            send_channel_message(app.client, group_channel, schedule_coffee_chat_message(user_pair, channel))
+            send_message(app.client, group_channel, schedule_coffee_chat_message(user_pair, channel))
 
-        send_channel_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))
+        send_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))
 
 
 def _ask_for_engagement() -> None:
     
-    expire_old_matches()
+    db.expire_old_intros()
 
-    matches = load_matches()
+    active_intros = db.load_active_intros()
 
-    for match in matches:
+    for intro in active_intros:
         
-        channel = Channel({'id': match['channel']})
+        channel = intro['channel']
         
-        for group_channel_id, users in match['intros'].items(): 
+        for group_channel, users in intro['intros'].items(): 
 
-            group_channel = Channel({'id': group_channel_id})
-            
-            send_channel_message(
+            send_message(
                 app.client, 
                 group_channel,
                 ask_if_chat_happened_message(channel)
@@ -108,52 +121,65 @@ def _ask_for_engagement() -> None:
 
 
 def _respond_to_action(event: dict) -> None:
-
-    # Check that request was sent from the slack application.
-    if 'headers' not in event or 'body' not in event:
-        return {'statusCode': 403}
-
-    if event.get('isBase64Encoded'):
-        body = base64.b64decode(event['body']).decode('utf-8')
-    else:
-        body = event['body']
-
-    slack_signature = event['headers'].get('x-slack-signature', '')
-    slack_timestamp = event['headers'].get('x-slack-request-timestamp', '')
-    slack_signing_secret = os.environ['SLACK_SIGNING_SECRET']
-
-    sig_basestring = f"v0:{slack_timestamp}:{body}"
-    my_signature = "v0=" + hmac.new(
-        slack_signing_secret.encode(),
-        sig_basestring.encode(),
-        hashlib.sha256
-    ).hexdigest()
-
-    if not hmac.compare_digest(my_signature, slack_signature):
-        return {'statusCode': 400}
-
-    # Get message.
-    payload = json.loads(urllib.parse.parse_qs(body)['payload'][0])
-    action = payload['actions'][0]['action_id']
-    response_url = payload['response_url']
     
-    channel = Channel({'id': payload['actions'][0]['value']})
-    group_channel = Channel({'id': payload['channel']['id']})
-    user = User({'id': payload['user']['id']})
+    event_body = process_http_call(event)
+    if not event_body:
+        return {'statusCode': 400}
+    
+    # Button clicks.
+    if event_body.get('type') == 'block_actions':
+        action = event_body['actions'][0]['action_id']
+        response_url = event_body['response_url']
+        
+        channel = event_body['actions'][0]['value']
+        group_channel = event_body['channel']['id']
+        user = event_body['user']['id']
+    
+        # Store action.
+        happened = action in ('meeting_happened', 'meeting_will_happen')
+        update_success = db.update_intro_happened(channel, group_channel, happened)
+        if not update_success:
+            action = 'expired'
+    
+        # Return response.
+        response_message = message_response_to_action(user, action)
+        if response_message:
+            respond_to_http_call(response_url, response_message)
 
-    # Store action.
-    did_meet = action in ('meeting_happened', 'meeting_will_happen')
-    update_success = update_match_did_meet(channel, group_channel, did_meet)
-    if not update_success:
-        action = 'expired'
+        return {'statusCode': 200}
+        
+    # Slash commands.
+    if 'command' in event_body:
+        command = event_body['command'][0]
+        response_url = event_body['response_url'][0]
+        
+        channel = event_body['channel_id'][0]
+        user = event_body['user_id'][0]
+        
+        channel_info = get_channel_info(app.client, channel)
+        
+        response_message = None
+        if not channel_info.get('is_member'):
+            response_message = f'{command} only works in channels that I have been added to!'
+        
+        if channel_info.get('is_member'):
+            if command == '/coffee_pause':
+                db.pause_intros(channel, user)
+                response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_resume` here at any time.'
+            
+            elif command == '/coffee_resume':
+                db.resume_intros(channel, user)
+                response_message = f'Intros have been resumed for you in <#{channel}>. You will be included in the next round of intros!'
+                
+        
+        if response_message:
+            respond_to_http_call(response_url, {'response_type': 'ephemeral', 'text': response_message})
+        
+        return {'statusCode': 200}
+        
+        
 
-    # Return response.
-    response_message = message_response_to_action(user, action)
-    if response_message:
-        respond_to_action(response_url, response_message)
-
-    return {'statusCode': 200}
-
+    return {'statusCode': 400}
 
 def lambda_handler(event, context):
 
@@ -174,4 +200,3 @@ def lambda_handler(event, context):
         
     # Non-scheduled event.
     return(_respond_to_action(event))
-
