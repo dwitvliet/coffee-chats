@@ -6,4 +6,4 @@ Create table `intros` with partition column `channel` and sort column `date`.
 Create index `is_latest_date-channel-index` with partition column `is_latest_date` and sort column `channel`.
 
 Todo:
-- Kick users if inactive twice in a row
+- Clean up reused database functions.
