@@ -108,8 +108,16 @@ def process_http_call(event: dict) -> dict:
     
     if 'payload' in parsed_body:
         # Actions like button clicks.
-        return json.loads(urllib.parse.parse_qs(body)['payload'][0])
+        parsed_body = json.loads(parsed_body['payload'][0])
+        team_id = parsed_body['user']['team_id']
         
+    else:
+        # Commands.
+        team_id = parsed_body['team_id'][0]
+    
+    if team_id != os.environ.get("SLACK_TEAM_ID"):
+        return
+
     return parsed_body
 
 
