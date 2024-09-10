@@ -10,7 +10,7 @@ Lambda:
 
 Triggers:
 
-- Add new EventBridge with schedule `cron(0 13 ? * MON,WED *)`.
+- Add new EventBridge with schedule `cron(0 13 ? * MON *)`.
 
 Dynamodb:
 

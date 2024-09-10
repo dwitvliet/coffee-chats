@@ -42,6 +42,7 @@ def split_into_pairs(users: list[str]) -> list[list[str]]:
 def _pair_users() -> None:
 
     for channel in get_member_channels(app.client):
+        
         logging.info(f'Pairing users in {channel}')
 
         # Get users to pair.
@@ -195,16 +196,23 @@ def _respond_to_action(event: dict) -> None:
 def lambda_handler(event, context):
     
     if event.get('source') == 'aws.events':
-        # Scheduled event
+        
         week = datetime.today().isocalendar().week
         weekday = datetime.today().isocalendar().weekday
-
-        if (week % 2 and weekday == 1) or event.get('force_pairing'):
-            # Monday.
+        
+        # Dev event.
+        if event.get('force_pairing'):
+            _pair_users()
+        elif event.get('force_ask_for_engagement'):
+            _ask_for_engagement()
+        
+        # Scheduled event
+        elif (week % 3 == 2 and weekday == 1):
+            # Every third Monday.
             _pair_users()
 
-        elif (not week % 2 and weekday == 3) or event.get('force_ask_for_engagement'):
-            # Wednesday.
+        elif (week % 3 == 1 and weekday == 1):
+            # Two weeks after pairing.
             _ask_for_engagement()
 
         return
