@@ -5,11 +5,12 @@ from typing import Optional
 
 class Database(object):
     
-    def __init__(self):
+    def __init__(self, table_prefix=''):
         self.dynamodb = boto3.resource('dynamodb')
-        self.access_tokens = self.dynamodb.Table('access_tokens')
-        self.intros = self.dynamodb.Table('intros')
-        self.paused_users = self.dynamodb.Table('paused_users')
+        self.access_tokens = self.dynamodb.Table(f'{table_prefix}access_tokens')
+        self.intros = self.dynamodb.Table(f'{table_prefix}intros')
+        self.ice_breaker_questions = self.dynamodb.Table(f'{table_prefix}ice_breaker_questions')
+        self.paused_users = self.dynamodb.Table(f'{table_prefix}paused_users')
     
     
     def _get_active_intros(self, channel: Optional[str] = None) -> list[dict]:
@@ -53,9 +54,34 @@ class Database(object):
         )['Items']
         if items:
             return items[0]['token']
+            
+    def get_ice_breaker_question(self) -> dict:
 
+        items = self.ice_breaker_questions.query(
+            IndexName='is_active-times_used-index',
+            KeyConditionExpression='is_active = :is_active',
+            ExpressionAttributeValues={
+                ':is_active': 1
+            },
+            Limit=1
+        )['Items']
+        
+        if items:
+            
+            question = items[0]
+            
+            self.ice_breaker_questions.update_item(
+                Key={'question_id': question['question_id']},
+                UpdateExpression='SET times_used = :times_used',
+                ExpressionAttributeValues={':times_used': question['times_used'] + 1}
+            )
+            
+            return question
+            
+        return {'question_id': -1, 'question': ''}
+    
 
-    def save_intros(self, channel: str, paired_users: list[list[str]], paired_group_channels: list[str]) -> bool:
+    def save_intros(self, channel: str, paired_users: list[list[str]], paired_group_channels: list[str], ice_breaker: dict) -> bool:
         table = self.intros
         current_date = datetime.today().strftime('%Y-%m-%d')
         
@@ -76,6 +102,7 @@ class Database(object):
             'channel': channel,
             'date': current_date,
             'is_active': 1,
+            'ice_break_question_id': ice_breaker['question_id'],
             'intros': {
                 group_channel: {
                     'users': users, 

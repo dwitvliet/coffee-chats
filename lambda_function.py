@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from slack_bolt import App
 
-from utils.messages import chats_scheduled_channel_message, ask_if_chat_happened_message
+from utils.messages import chats_scheduled_channel_message, chats_scheduled_dm_message, ask_if_chat_happened_message
 from utils.database import Database
 from utils.slack_helpers import (
     get_member_channels,
@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 # Initialize the Bolt app with your bot token and signing secret
-db = Database()
+db = Database(table_prefix=os.environ.get("TABLE_PREFIX"))
 access_token = db.get_access_token(os.environ.get("SLACK_TEAM_ID"))
 
 app = App(
@@ -44,6 +44,8 @@ def split_into_pairs(users: list[str]) -> list[list[str]]:
 
 def _pair_users() -> None:
     print('Pairing users')
+    
+    ice_breaker_question = None
 
     for channel in get_member_channels(app.client):
         
@@ -93,15 +95,15 @@ def _pair_users() -> None:
         for user_pair in paired_users:
             paired_group_channels.append(get_group_channel(app.client, ','.join(user_pair)))
 
-        intros_were_saved = db.save_intros(channel, paired_users, paired_group_channels)
+        if ice_breaker_question is None:
+            ice_breaker_question = db.get_ice_breaker_question()
+            
+        intros_were_saved = db.save_intros(channel, paired_users, paired_group_channels, ice_breaker_question)
         if not intros_were_saved:
             continue
 
         for user_pair, group_channel in zip(paired_users, paired_group_channels):
-            user_pair_count = 'two' if len(user_pair) == 2 else 'three'
-            schedule_coffee_chat_message = {
-                'text': f'Hi, you {user_pair_count} have been paired this week in <#{channel}>! Please set up a calendar invite to have a fun chat!'
-            }
+            schedule_coffee_chat_message = chats_scheduled_dm_message(channel, len(user_pair), ice_breaker_question['question'])
             send_message(app.client, group_channel, schedule_coffee_chat_message)
 
         send_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))

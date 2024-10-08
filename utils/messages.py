@@ -1,6 +1,19 @@
 from typing import Optional
 
 
+def chats_scheduled_dm_message(channel: str, user_pair_count: int, ice_breaker_question: str):
+    count = {2: 'two', 3: 'three'}.get(user_pair_count, 'all')
+            
+    message = f'''
+Hi, you {count} have been paired this week in <#{channel}>! Please set up a calendar invite to have a fun chat!
+    
+Start your chat this week by answering the question:
+*{ice_breaker_question}*
+'''
+    
+    return {'text': message}
+    
+    
 def chats_scheduled_channel_message(n_pairs: int, previous_intros_stats: Optional[dict] = None) -> dict:
     
     message = f'''*{n_pairs}* intros have just been sent out!'''

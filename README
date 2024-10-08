@@ -15,6 +15,8 @@ Triggers:
 Dynamodb:
 
 - Create table `intros` with partition column `channel` and sort column `date`.
-- Create index `is_latest_date-channel-index` with partition column `is_latest_date` and sort column `channel`.
+- Create index `is_active-channel-index` with partition column `is_active` (N) and sort column `channel` (S).
 - Create table `access_tokens` with partition column `team`.
 - Create table `paused_users` with partition column `channel` and sort column `user`.
+- Create table `ice_breaker_questions` with partition column `question_id`.
+- Create index `is_active-times_used-index` with partition column `is_active` (N) and sort column `times_used` (N).
