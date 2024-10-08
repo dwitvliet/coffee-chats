@@ -19,6 +19,9 @@ from utils.slack_helpers import (
 )
 
 
+logging.basicConfig(level=logging.INFO)
+
+
 # Initialize the Bolt app with your bot token and signing secret
 db = Database()
 access_token = db.get_access_token(os.environ.get("SLACK_TEAM_ID"))
@@ -40,10 +43,11 @@ def split_into_pairs(users: list[str]) -> list[list[str]]:
 
 
 def _pair_users() -> None:
+    print('Pairing users')
 
     for channel in get_member_channels(app.client):
         
-        logging.info(f'Pairing users in {channel}')
+        print(f'Pairing users in {channel}')
 
         # Get users to pair.
         users = get_channel_users(app.client, channel)
@@ -80,7 +84,7 @@ def _pair_users() -> None:
                 
         # Randomize users.
         if len(users) < 2:
-            logging.warning('Too few users')
+            logging.warning(f'Too few users in {channel}')
             continue
         paired_users = split_into_pairs(users)
         
@@ -104,14 +108,15 @@ def _pair_users() -> None:
 
 
 def _ask_for_engagement() -> None:
+    print('Asking for engagement')
     
     db.expire_old_intros()
 
     active_intros = db.load_active_intros()
 
     for intro in active_intros:
-        
         channel = intro['channel']
+        print(channel)
         
         for group_channel, users in intro['intros'].items(): 
 
@@ -195,7 +200,11 @@ def _respond_to_action(event: dict) -> None:
 
 def lambda_handler(event, context):
     
+    print(event)
+    
     if event.get('source') == 'aws.events':
+        
+        print('Scheduled event')
         
         week = datetime.today().isocalendar().week
         weekday = datetime.today().isocalendar().weekday

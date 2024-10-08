@@ -91,7 +91,7 @@ class Database(object):
     def expire_old_intros(self) -> None:
         previous_intros = self._get_active_intros()
         for intro in previous_intros:
-            if datetime.now() - datetime.fromisoformat(intro['date']) > timedelta(days=14):
+            if datetime.now() - datetime.fromisoformat(intro['date']) > timedelta(days=16):
                 self._expire_intro(intro['channel'], intro['date'])
 
 
