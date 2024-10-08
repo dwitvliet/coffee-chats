@@ -2,3 +2,4 @@
 __pycache__
 
 /slack*
+.ruff_cache
