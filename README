@@ -7,6 +7,7 @@ Lambda:
 - Add environmental variables `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and `SLACK_SIGNING_SECRET` from the slack app.
 - Add environmental variable `FUNCTION_URL` from Lambda.
 - Add environmental variable `SLACK_TEAM_ID` (see `access_tokens` table after authentification).
+- Add environmental variable `TABLE_PREFIX` that indicates if your DynamoDB tables should all be named with a prefix (`prod_`).
 
 Triggers:
 
