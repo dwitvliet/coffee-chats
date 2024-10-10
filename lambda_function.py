@@ -5,6 +5,8 @@ import logging
 from collections import defaultdict
 
 from slack_bolt import App
+from slack_bolt.adapter.aws_lambda import SlackRequestHandler
+from slack_bolt.authorization import AuthorizeResult
 
 from utils.messages import chats_scheduled_channel_message, chats_scheduled_dm_message, ask_if_chat_happened_message
 from utils.database import Database
@@ -14,7 +16,7 @@ from utils.slack_helpers import (
     get_channel_users, 
     get_group_channel, 
     send_message,
-    process_http_call,
+    authenticate_new_install,
     respond_to_http_call
 )
 
@@ -26,11 +28,22 @@ logging.basicConfig(level=logging.INFO)
 db = Database(table_prefix=os.environ.get("TABLE_PREFIX"))
 access_token = db.get_access_token(os.environ.get("SLACK_TEAM_ID"))
 
+def authorize(enterprise_id, team_id, user_id):
+    if team_id == os.environ.get("SLACK_TEAM_ID"):
+        return AuthorizeResult(
+            enterprise_id=enterprise_id,
+            team_id=team_id,
+            bot_token=db.get_access_token(team_id)
+        )
+    else:
+        raise Exception(f"Unauthorized workspace: {team_id}")
+
 app = App(
     token=access_token,
-    signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
+    signing_secret=os.environ.get("SLACK_SIGNING_SECRET"),
+    authorize=authorize,
+    process_before_response=True 
 )
-
 
 def split_into_pairs(users: list[str]) -> list[list[str]]:
     random.shuffle(users)
@@ -103,6 +116,7 @@ def _pair_users() -> None:
             continue
 
         for user_pair, group_channel in zip(paired_users, paired_group_channels):
+
             schedule_coffee_chat_message = chats_scheduled_dm_message(channel, len(user_pair), ice_breaker_question['question'])
             send_message(app.client, group_channel, schedule_coffee_chat_message)
 
@@ -129,75 +143,79 @@ def _ask_for_engagement() -> None:
             )
 
 
-def _respond_to_action(event: dict) -> None:
+@app.command('/coffee_pause')
+@app.command('/coffee_resume')
+def handle_command(ack, body, logger):
+    ack()
+    print(f"Command received: {body}")
     
-    event_body = process_http_call(event)
-    if not event_body:
-        return {'statusCode': 400}
+    command = body['command']
+    response_url = body['response_url']
+    channel = body['channel_id']
+    user = body['user_id']
+
+    channel_info = get_channel_info(app.client, channel)
+    response_message = None
+    if not channel_info.get('is_member'):
+        response_message = f'{command} only works in channels that I have been added to!'
+    elif command == '/coffee_pause':
+        db.pause_intros(channel, user)
+        response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_resume` here at any time.'
+    elif command == '/coffee_resume':
+        db.resume_intros(channel, user)
+        response_message = f'Intros have been resumed for you in <#{channel}>. You will be included in the next round of intros!'
     
-    # New install authentification.
-    if 'authentication' in event_body:
-        if event_body['authentication'] == 'Authentification successful':
-            db.save_access_token(event_body['team_id'], event_body['access_token'])
+    if response_message:
+        print(response_message)
+        respond_to_http_call(response_url, response_message, 'ephemeral')
+
+
+@app.action('meeting_happened')
+@app.action('meeting_did_not_happen')
+@app.action('meeting_will_happen')
+def handle_command(ack, body, logger):
+    ack()
+    print(f"Action received: {body}")
+    
+    action = body['actions'][0]['action_id']
+    response_url = body['response_url']
+    channel = body['actions'][0]['value']
+    group_channel = body['channel']['id']
+    user = body['user']['id']
+
+    # Store action.
+    happened = action in ('meeting_happened', 'meeting_will_happen')
+    update_success = db.update_intro_happened(channel, group_channel, happened)
+    
+    # Return response.
+    response_message = None
+    if not update_success:
+        response_message = 'Response button expired.'
+    elif action == 'meeting_happened':
+        response_message = f'<@{user}> said that *you met*. Awesome!'
+    elif action == 'meeting_did_not_happen':
+        response_message = f'<@{user}> said that *you haven\'t met yet*.'
+    elif action == 'meeting_will_happen':
+        response_message = f'<@{user}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
+
+    if response_message:
+        respond_to_http_call(response_url, response_message, 'in_channel')
+        
+        
+def _respond_to_action(event: dict, context) -> None:
+    
+    # Authenticate new app install.
+    auth_code = event.get('queryStringParameters', {}).get('code', None)
+    if auth_code and event.get('requestContext', {}).get('http', {}).get('method') == 'GET':
+        auth_response = authenticate_new_install(auth_code)
+        if auth_response['authentication'] == 'Authentification successful':
+            db.save_access_token(auth_response['team_id'], auth_response['access_token'])
+            return {'statusCode': 200, 'body': auth_response['authentication']}
+        else:
+            return {'statusCode': 400}
             
-        return {'statusCode': 200, 'body': event_body['authentication']}
-        
-    # Button clicks.
-    if event_body.get('type') == 'block_actions':
-        action = event_body['actions'][0]['action_id']
-        response_url = event_body['response_url']
-        
-        channel = event_body['actions'][0]['value']
-        group_channel = event_body['channel']['id']
-        user = event_body['user']['id']
-    
-        # Store action.
-        happened = action in ('meeting_happened', 'meeting_will_happen')
-        update_success = db.update_intro_happened(channel, group_channel, happened)
-        
-        # Return response.
-        response_message = None
-        if not update_success:
-            response_message = 'Response button expired.'
-        elif action == 'meeting_happened':
-            response_message = f'<@{user}> said that *you met*. Awesome!'
-        elif action == 'meeting_did_not_happen':
-            response_message = f'<@{user}> said that *you haven\'t met yet*.'
-        elif action == 'meeting_will_happen':
-            response_message = f'<@{user}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
 
-        if response_message:
-            respond_to_http_call(response_url, response_message, 'in_channel')
-
-        return {'statusCode': 200}
-        
-    # Slash commands.
-    if 'command' in event_body:
-        command = event_body['command'][0]
-        response_url = event_body['response_url'][0]
-        
-        channel = event_body['channel_id'][0]
-        user = event_body['user_id'][0]
-        
-        channel_info = get_channel_info(app.client, channel)
-        
-        response_message = None
-        if not channel_info.get('is_member'):
-            response_message = f'{command} only works in channels that I have been added to!'
-        elif command == '/coffee_pause':
-            db.pause_intros(channel, user)
-            response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_resume` here at any time.'
-        elif command == '/coffee_resume':
-            db.resume_intros(channel, user)
-            response_message = f'Intros have been resumed for you in <#{channel}>. You will be included in the next round of intros!'
-                
-        
-        if response_message:
-            respond_to_http_call(response_url, response_message, 'ephemeral')
-        
-        return {'statusCode': 200}
-
-    return {'statusCode': 400}
+    return SlackRequestHandler(app=app).handle(event, context)
 
 
 def lambda_handler(event, context):
@@ -229,4 +247,4 @@ def lambda_handler(event, context):
         return
         
     # Non-scheduled event.
-    return(_respond_to_action(event))
+    return(_respond_to_action(event, context))
