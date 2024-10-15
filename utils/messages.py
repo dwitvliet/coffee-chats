@@ -8,7 +8,7 @@ def chats_scheduled_dm_message(channel: str, user_pair_count: int, ice_breaker_q
 Hi, you {count} have been paired this week in <#{channel}>! Please set up a calendar invite to have a fun chat!
     
 Start your chat this week by answering the question:
-*{ice_breaker_question}*
+:speech_balloon: *{ice_breaker_question}*
 '''
     
     return {'text': message}

@@ -1,6 +1,6 @@
 import boto3
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 class Database(object):
@@ -8,6 +8,7 @@ class Database(object):
     def __init__(self, table_prefix=''):
         self.dynamodb = boto3.resource('dynamodb')
         self.access_tokens = self.dynamodb.Table(f'{table_prefix}access_tokens')
+        self.channels = self.dynamodb.Table(f'{table_prefix}channels')
         self.intros = self.dynamodb.Table(f'{table_prefix}intros')
         self.ice_breaker_questions = self.dynamodb.Table(f'{table_prefix}ice_breaker_questions')
         self.paused_users = self.dynamodb.Table(f'{table_prefix}paused_users')
@@ -55,6 +56,44 @@ class Database(object):
         if items:
             return items[0]['token']
             
+
+    
+    def get_channel_settings(self, channel: str) -> dict:
+        channel_metadata =  self.channels.query(
+            KeyConditionExpression='channel = :channel',
+            ExpressionAttributeValues={
+                ':channel': channel
+            }
+        )['Items']
+        
+        if channel_metadata:
+            return channel_metadata[0]
+        
+        return None
+
+    
+    def create_or_update_channel_settings(self, channel: str, frequency: str = None, last_coffee_chat_dt: str = None) -> dict:
+        channel_metadata =  self.get_channel_settings(channel)
+        if not channel_metadata:
+            channel_metadata = {
+                'channel': channel, 
+                'added_dt': datetime.today().strftime('%Y-%m-%d'),
+                'frequency': 'biweekly',
+                'is_active': True,
+                'last_coffee_chat_dt': None
+            }
+        
+        if frequency:
+            channel_metadata['frequency'] = frequency
+            
+        if last_coffee_chat_dt:
+            channel_metadata['last_coffee_chat_dt'] = last_coffee_chat_dt
+        
+        self.channels.put_item(Item=channel_metadata) 
+        
+        return channel_metadata
+        
+            
     def get_ice_breaker_question(self) -> dict:
 
         items = self.ice_breaker_questions.query(
@@ -96,6 +135,8 @@ class Database(object):
                 return False
             
             self._expire_intro(channel, active_intro_date)
+            
+        self.create_or_update_channel_settings(channel, last_coffee_chat_dt=current_date)
         
         # Insert new intro record.
         table.put_item(Item={

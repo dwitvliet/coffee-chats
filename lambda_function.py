@@ -63,6 +63,17 @@ def _pair_users() -> None:
     for channel in get_member_channels(app.client):
         
         print(f'Pairing users in {channel}')
+        
+        channel_metadata = db.get_channel_settings(channel)
+        if not channel_metadata:
+            channel_metadata = db.create_or_update_channel_settings(channel)
+        print(f'Channel settings: {channel_metadata}')
+        if not channel_metadata['is_active']:
+            print('Skipping inactive channel')
+            continue
+        if channel_metadata['last_coffee_chat_dt'] == datetime.today().strftime('%Y-%m-%d'):
+            print('Skipping since intros were sent already today.')
+            continue
 
         # Get users to pair.
         users = get_channel_users(app.client, channel)
@@ -92,12 +103,13 @@ def _pair_users() -> None:
         for user in users:
             if missed_intros[user] >= 2:
                 db.pause_intros(channel, user)
-                send_message(app.client, user, {'text': f'Intros have been paused for you in <#{channel}> due to inactivity (missing your last two intros). To be included in the next round of intros, run `/coffee_resume` in the channel at any time.'})
+                send_message(app.client, user, {'text': f'Intros have been paused for you in <#{channel}> due to inactivity (missing your last two intros). To be included in the next round of intros, run `/coffee_chat resume` in the channel at any time.'})
                 skipped_users.append(user)
                 
         users = [u for u in users if u not in skipped_users]
                 
         # Randomize users.
+        print(f'{len(users)} to pair.')
         if len(users) < 2:
             logging.warning(f'Too few users in {channel}')
             continue
@@ -143,32 +155,56 @@ def _ask_for_engagement() -> None:
             )
 
 
-@app.command('/coffee_pause')
-@app.command('/coffee_resume')
+def _execute_scheduled_event():
+    if (week % 3 == 2 and weekday == 1):
+        # Every third Monday.
+        _pair_users()
+
+    if (week % 3 == 1 and weekday == 1):
+        # Two weeks after pairing.
+        _ask_for_engagement()
+
+
+
+@app.command('/coffee_chat')
 def handle_command(ack, body, logger):
     ack()
     print(f"Command received: {body}")
     
     command = body['command']
+    argument = body['text']
     response_url = body['response_url']
     channel = body['channel_id']
     user = body['user_id']
+    
+    print(body)
 
     channel_info = get_channel_info(app.client, channel)
-    print(channel_info)
-    response_message = None
+
     if channel_info.get('is_mpim') or not channel_info.get('is_member'):
         response_message = f'{command} only works in channels that I have been added to!'
-    elif command == '/coffee_pause':
+        
+    elif argument == 'pause':
         db.pause_intros(channel, user)
-        response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_resume` here at any time.'
-    elif command == '/coffee_resume':
+        response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_chat resume` here at any time.'
+    elif argument == 'resume':
         db.resume_intros(channel, user)
         response_message = f'Intros have been resumed for you in <#{channel}>. You will be included in the next round of intros!'
+    elif argument in ('set biweekly', 'set triweekly'):
+        db.create_or_update_channel_settings(channel, frequency=argument.split()[1])
+        response_message = f'Intros in <#{channel}> has been set to {argument.split()[1]}.'
+        if argument == 'set biweekly':
+            pass
+        if argument == 'set triweekly':
+            pass
+
     
-    if response_message:
-        print(response_message)
-        respond_to_http_call(response_url, response_message, 'ephemeral')
+    else:
+        response_message = 'Unknown command. Must be either `/coffee_chat pause` or `/coffee_chat resume`.'
+    
+
+    print(response_message)
+    respond_to_http_call(response_url, response_message, 'ephemeral')
 
 
 @app.action('meeting_happened')
@@ -202,22 +238,6 @@ def handle_command(ack, body, logger):
     if response_message:
         respond_to_http_call(response_url, response_message, 'in_channel')
         
-        
-def _respond_to_action(event: dict, context) -> None:
-    
-    # Authenticate new app install.
-    auth_code = event.get('queryStringParameters', {}).get('code', None)
-    if auth_code and event.get('requestContext', {}).get('http', {}).get('method') == 'GET':
-        auth_response = authenticate_new_install(auth_code)
-        if auth_response['authentication'] == 'Authentification successful':
-            db.save_access_token(auth_response['team_id'], auth_response['access_token'])
-            return {'statusCode': 200, 'body': auth_response['authentication']}
-        else:
-            return {'statusCode': 400}
-            
-
-    return SlackRequestHandler(app=app).handle(event, context)
-
 
 def lambda_handler(event, context):
     
@@ -237,15 +257,18 @@ def lambda_handler(event, context):
             _ask_for_engagement()
         
         # Scheduled event
-        elif (week % 3 == 2 and weekday == 1):
-            # Every third Monday.
-            _pair_users()
-
-        elif (week % 3 == 1 and weekday == 1):
-            # Two weeks after pairing.
-            _ask_for_engagement()
-
+        _execute_scheduled_event()
         return
         
-    # Non-scheduled event.
-    return(_respond_to_action(event, context))
+    # Authenticate new app install.
+    auth_code = event.get('queryStringParameters', {}).get('code', None)
+    if auth_code and event.get('requestContext', {}).get('http', {}).get('method') == 'GET':
+        auth_response = authenticate_new_install(auth_code)
+        if auth_response['authentication'] == 'Authentification successful':
+            db.save_access_token(auth_response['team_id'], auth_response['access_token'])
+            return {'statusCode': 200, 'body': auth_response['authentication']}
+        else:
+            return {'statusCode': 400}
+            
+    # Other actions.
+    return SlackRequestHandler(app=app).handle(event, context)
