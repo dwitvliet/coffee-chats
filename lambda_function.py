@@ -262,7 +262,7 @@ def handle_member_joined_channel(event, say):
     if user_joined == bot_user:
         db.get_or_update_channel_settings(channel, new_add=True)
         next_pairing_date = db.get_next_pairing_date(channel)
-        say(channel=channel, text=f'Hi, I will facilitate coffee chats in this channel!\n\nThe first round will go out on *Monday* ({next_pairing_date.strftime("%b %d")}).')
+        say(channel=channel, text=f'Hi, I will facilitate coffee chats in this channel! :coffee:\n\nThe first round will go out on *Monday* ({next_pairing_date.strftime("%b %d")}).')
         
 
 
