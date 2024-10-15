@@ -1,6 +1,6 @@
 import os
 import random
-from datetime import datetime
+from datetime import datetime, date
 import logging
 from collections import defaultdict
 
@@ -15,6 +15,7 @@ from utils.slack_helpers import (
     get_channel_info,
     get_channel_users, 
     get_group_channel, 
+    set_channel_topic,
     send_message,
     authenticate_new_install,
     respond_to_http_call
@@ -76,117 +77,105 @@ def randomize_users(users: list[str]) -> list[list[str]]:
     return coffee_chats
 
 
-def _pair_users() -> None:
-    print('Pairing users')
+def _pair_users(channel, ice_breaker_question) -> None:
+
+    # Get users to pair.
+    users = get_channel_users(app.client, channel)
+    paused_users = db.get_paused_intros(channel)
+    print(f'Users in channel: {len(users)}')
+    print(f'Paused users: {len(paused_users)}')
+    users = [u for u in users if u not in paused_users]
+
+    # Calculate stats for previous intro.
+    recent_intros = db.load_recent_intros(channel)
+    if recent_intros and recent_intros[0]['is_active']:
+        previous_intros_stats = {
+            'intros_count': len(recent_intros[0]['intros']),
+            'meetings_count': sum([m['happened'] for m in recent_intros[0]['intros'].values()])
+        }
+    else:
+        previous_intros_stats = None
+        
+    # Determine which users need to be skipped due to inactivity.
+    missed_intros = defaultdict(int)
+    for round in recent_intros:
+        for intro in round['intros'].values():
+            if intro['happened']:
+                continue
+            for user in intro['users']:
+                missed_intros[user] += 1
     
-    ice_breaker_question = None
-
-    for channel in get_member_channels(app.client):
-        
-        print(f'Pairing users in {channel}')
-        
-        channel_metadata = db.get_channel_settings(channel)
-        if not channel_metadata:
-            channel_metadata = db.create_or_update_channel_settings(channel)
-        print(f'Channel settings: {channel_metadata}')
-        if not channel_metadata['is_active']:
-            print('Skipping inactive channel')
-            continue
-        if channel_metadata['last_coffee_chat_dt'] == datetime.today().strftime('%Y-%m-%d'):
-            print('Skipping since intros were sent already today.')
-            continue
-
-        # Get users to pair.
-        users = get_channel_users(app.client, channel)
-        paused_users = db.get_paused_intros(channel)
-        print(f'Users in channel: {len(users)}')
-        print(f'Paused users: {len(paused_users)}')
-        users = [u for u in users if u not in paused_users]
-
-        # Calculate stats for previous intro.
-        recent_intros = db.load_recent_intros(channel)
-        if recent_intros and recent_intros[0]['is_active']:
-            previous_intros_stats = {
-                'intros_count': len(recent_intros[0]['intros']),
-                'meetings_count': sum([m['happened'] for m in recent_intros[0]['intros'].values()])
-            }
-        else:
-            previous_intros_stats = None
+    skipped_users = []
+    for user in users:
+        if missed_intros[user] >= 2:
+            db.pause_intros(channel, user)
+            send_message(app.client, user, {'text': f'Intros have been paused for you in <#{channel}> due to inactivity (missing your last two intros). To be included in the next round of intros, run `/coffee_chat resume` in the channel at any time.'})
+            skipped_users.append(user)
             
-        # Determine which users need to be skipped due to inactivity.
-        missed_intros = defaultdict(int)
-        for round in recent_intros:
-            for intro in round['intros'].values():
-                if intro['happened']:
-                    continue
-                for user in intro['users']:
-                    missed_intros[user] += 1
-        
-        skipped_users = []
-        for user in users:
-            if missed_intros[user] >= 2:
-                db.pause_intros(channel, user)
-                send_message(app.client, user, {'text': f'Intros have been paused for you in <#{channel}> due to inactivity (missing your last two intros). To be included in the next round of intros, run `/coffee_chat resume` in the channel at any time.'})
-                skipped_users.append(user)
-                
-        users = [u for u in users if u not in skipped_users]
-                
-        # Randomize users.
-        print(f'{len(users)} to pair.')
-        if len(users) < 2:
-            logging.warning(f'Too few users in {channel}')
-            continue
-        paired_users = randomize_users(users)
-        
-        # Send intro messages.
-        paired_group_channels = []
-        for user_pair in paired_users:
-            paired_group_channels.append(get_group_channel(app.client, ','.join(user_pair)))
-
-        if ice_breaker_question is None:
-            ice_breaker_question = db.get_ice_breaker_question()
+    users = [u for u in users if u not in skipped_users]
             
-        db.save_intros(channel, paired_users, paired_group_channels, ice_breaker_question)
+    # Randomize users.
+    print(f'{len(users)} to pair.')
+    if len(users) < 2:
+        logging.warning(f'Too few users in {channel}')
+        return
+    paired_users = randomize_users(users)
+    
+    # Send intro messages.
+    paired_group_channels = []
+    for user_pair in paired_users:
+        paired_group_channels.append(get_group_channel(app.client, ','.join(user_pair)))
 
-        for user_pair, group_channel in zip(paired_users, paired_group_channels):
+    db.save_intros(channel, paired_users, paired_group_channels, ice_breaker_question)
 
-            schedule_coffee_chat_message = chats_scheduled_dm_message(channel, len(user_pair), ice_breaker_question['question'])
-            send_message(app.client, group_channel, schedule_coffee_chat_message)
+    for user_pair, group_channel in zip(paired_users, paired_group_channels):
+        schedule_coffee_chat_message = chats_scheduled_dm_message(channel, len(user_pair), ice_breaker_question['question'])
+        send_message(app.client, group_channel, schedule_coffee_chat_message)
 
-        send_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))
+    next_pairing_date = db.get_next_pairing_date(channel)
+    set_channel_topic(app.client, channel, f'Next coffee chats: {next_pairing_date.strftime("%b %d")}')
+    send_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))
+    
 
 
-def _ask_for_engagement() -> None:
+def _ask_for_engagement(channel) -> None:
     print('Asking for engagement')
     
-    db.expire_old_intros()
+    active_intro = db.get_active_intro(channel)
+    if not active_intro:
+        print('Warning: no active intro.')
 
-    active_intros = db.load_active_intros()
+    for group_channel, users in active_intro['intros'].items(): 
+        send_message(
+            app.client, 
+            group_channel,
+            ask_if_chat_happened_message(channel)
+        )
 
-    for intro in active_intros:
-        channel = intro['channel']
-        print(channel)
+
+def _execute_scheduled_event(overwrite_today: date = None) -> None:
+
+    ice_breaker_question = None
+    
+    for channel in get_member_channels(app.client):
         
-        for group_channel, users in intro['intros'].items(): 
-
-            send_message(
-                app.client, 
-                group_channel,
-                ask_if_chat_happened_message(channel)
-            )
-
-
-def _execute_scheduled_event():
-    week = datetime.today().isocalendar().week
-    weekday = datetime.today().isocalendar().weekday
+        print(f':: {channel} ::')
         
-    if (week % 3 == 2 and weekday == 1):
-        # Every third Monday.
-        _pair_users()
-
-    if (week % 3 == 1 and weekday == 1):
-        # Two weeks after pairing.
-        _ask_for_engagement()
+        today = overwrite_today or datetime.today().date()
+        next_pairing_date = db.get_next_pairing_date(channel)
+        next_engagement_survey_date = db.get_next_engagement_survey_date(channel)
+        print(f'Next pairing date: {next_pairing_date}')
+        
+        if today == next_pairing_date:
+            print('Pairing users')
+            if ice_breaker_question is None:
+                ice_breaker_question = db.get_ice_breaker_question()
+            _pair_users(channel, ice_breaker_question)
+        elif today == next_engagement_survey_date:
+            print('Asking for engagement')
+            _ask_for_engagement(channel)
+        else:
+            print('Nothing to do')
 
 
 
@@ -273,9 +262,13 @@ def lambda_handler(event, context):
 
         # Dev event.
         if event.get('force_pairing'):
-            _pair_users()
-        elif event.get('force_ask_for_engagement'):
-            _ask_for_engagement()
+            db.get_or_update_channel_settings('C051N2XP2NS', frequency='biweekly', last_coffee_chat_dt='2024-10-07')
+            _execute_scheduled_event(overwrite_today=date(2024, 10, 21))
+            return
+        if event.get('force_ask_for_engagement'):
+            db.get_or_update_channel_settings('C051N2XP2NS', frequency='biweekly', last_coffee_chat_dt='2024-10-14')
+            _execute_scheduled_event(overwrite_today=date(2024, 10, 21))
+            return
         
         # Scheduled event
         _execute_scheduled_event()

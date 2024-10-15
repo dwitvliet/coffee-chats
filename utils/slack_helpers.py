@@ -69,6 +69,23 @@ def get_group_channel(client: WebClient, users: list[str]) -> str:
     except SlackApiError as e:
         logging.error(f"Error sending message: {e.response['error']}")
         return
+
+
+def set_channel_topic(client: WebClient, channel: str, topic: str) -> None:
+    print(f'Setting channel topic to {topic}')
+    try:
+        response = client.conversations_setTopic(channel=channel, topic=topic)
+        
+        print(response)
+        
+        if response['ok']:
+            return f'Channel topic updated to: {topic}'
+        else:
+            return f"Failed to update topic: {response['error']}"
+
+    except SlackApiError as e:
+        logging.error(f"Error sending message: {e.response['error']}")
+        return
     
 
 def send_message(client: WebClient, channel: str, message: dict) -> None:

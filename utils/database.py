@@ -1,7 +1,7 @@
 import boto3
 import logging
 from datetime import date, datetime, timedelta
-from typing import Optional
+
 
 class Database(object):
     
@@ -14,21 +14,20 @@ class Database(object):
         self.paused_users = self.dynamodb.Table(f'{table_prefix}paused_users')
     
     
-    def _get_active_intros(self, channel: Optional[str] = None) -> list[dict]:
-        query = dict(
+    def get_active_intro(self, channel: str) -> dict:
+        intros = self.intros.query(
             IndexName='is_active-channel-index',
-            KeyConditionExpression='is_active = :is_active',
+            KeyConditionExpression='is_active = :is_active AND channel = :channel',
             ExpressionAttributeValues={
                 ':is_active': 1,
+                ':channel': channel,
             }
-        )
-
-        if channel:
-            query['KeyConditionExpression'] += ' AND channel = :channel'
-            query['ExpressionAttributeValues'][':channel'] = channel
-
-        return self.intros.query(**query)['Items']
-    
+        )['Items']
+        
+        if intros:
+            return intros[0]
+            
+        return None
 
     def _expire_intro(self, channel: str, date: str) -> None:
         self.intros.update_item(
@@ -70,15 +69,18 @@ class Database(object):
             return channel_metadata[0]
         
         return None
-
-    
-    def create_or_update_channel_settings(self, channel: str, frequency: str = None, last_coffee_chat_dt: str = None) -> dict:
-        channel_metadata =  self.get_channel_settings(channel)
+        
+        
+    def get_or_update_channel_settings(self, channel: str, frequency: str = None, last_coffee_chat_dt: str = None) -> dict:
+        channel_metadata = self.get_channel_settings(channel)
+        if channel_metadata and not frequency and not last_coffee_chat_dt:
+            return channel_metadata
+        
         if not channel_metadata:
             channel_metadata = {
                 'channel': channel, 
                 'added_dt': datetime.today().strftime('%Y-%m-%d'),
-                'frequency': 'biweekly',
+                'frequency': 'triweekly',
                 'is_active': True,
                 'last_coffee_chat_dt': None
             }
@@ -92,6 +94,41 @@ class Database(object):
         self.channels.put_item(Item=channel_metadata) 
         
         return channel_metadata
+        
+        
+    def get_next_pairing_date(self, channel: str) -> date:
+        channel_metadata = self.get_or_update_channel_settings(channel)
+        last_coffee_chat_dt = channel_metadata['last_coffee_chat_dt']
+        channel_added_dt = channel_metadata['added_dt']
+        pairing_frequency = channel_metadata['frequency']
+        
+        next_pairing_date = None
+        if not channel_metadata['is_active']:
+            next_pairing_date = date(9999, 12, 31)
+        elif last_coffee_chat_dt and pairing_frequency == 'biweekly':
+            next_pairing_date = datetime.fromisoformat(last_coffee_chat_dt).date() + timedelta(days=14)
+        elif last_coffee_chat_dt and pairing_frequency == 'triweekly':
+            next_pairing_date = datetime.fromisoformat(last_coffee_chat_dt).date() + timedelta(days=21)
+        elif last_coffee_chat_dt:
+            raise Exception('Unexpected frequency:', pairing_frequency)
+        else:
+            next_pairing_date = max(
+                datetime.fromisoformat(channel_added_dt).date() + timedelta(days=7),
+                datetime.now().date() + timedelta(days=6)
+            )
+        
+        # Set to Monday.
+        next_pairing_date = next_pairing_date - timedelta(days=next_pairing_date.weekday())
+            
+        return next_pairing_date
+    
+    def get_next_engagement_survey_date(self, channel: str) -> date:
+        next_pairing_date = self.get_next_pairing_date(channel)
+        next_engagement_survey_date = next_pairing_date - timedelta(7)
+        if next_engagement_survey_date == datetime.fromisoformat(self.get_or_update_channel_settings(channel)['last_engagement_asked_dt'] or '9999-12-31'):
+            print('Already did survey for this round')
+            next_engagement_survey_date = date(9999, 12, 31)
+        return next_engagement_survey_date
         
             
     def get_ice_breaker_question(self) -> dict:
@@ -125,13 +162,13 @@ class Database(object):
         current_date = datetime.today().strftime('%Y-%m-%d')
         
         # Set previous intros as inactive.
-        active_intro = self._get_active_intros(channel)
+        active_intro = self.get_active_intro(channel)
         
         if active_intro:
-            active_intro_date = active_intro[0]['date']
+            active_intro_date = active_intro['date']
             self._expire_intro(channel, active_intro_date)
             
-        self.create_or_update_channel_settings(channel, last_coffee_chat_dt=current_date)
+        self.get_or_update_channel_settings(channel, last_coffee_chat_dt=current_date)
         
         # Insert new intro record.
         table.put_item(Item={
@@ -148,14 +185,6 @@ class Database(object):
             }
         }) 
 
-
-    def expire_old_intros(self) -> None:
-        previous_intros = self._get_active_intros()
-        for intro in previous_intros:
-            if datetime.now() - datetime.fromisoformat(intro['date']) > timedelta(days=16):
-                self._expire_intro(intro['channel'], intro['date'])
-
-
     def load_recent_intros(self, channel) -> list:
         return self.intros.query(
             KeyConditionExpression='channel = :channel',
@@ -167,20 +196,16 @@ class Database(object):
         )['Items']
 
 
-    def load_active_intros(self) -> list:
-        return self._get_active_intros()
-
 
     def update_intro_happened(self, channel: str, group_channel: str, happened: bool) -> str:
-        previous_intros = self._get_active_intros(channel)
-        if not previous_intros:
+        previous_intro = self.get_active_intro(channel)
+        if not previous_intro:
             return
         
-        match = previous_intros[0]
         self.intros.update_item(
             Key={
-                'channel': match['channel'],
-                'date': match['date']
+                'channel': previous_intro['channel'],
+                'date': previous_intro['date']
             },
             UpdateExpression='SET intros.#group_channel.happened = :happened',
             ExpressionAttributeNames={
