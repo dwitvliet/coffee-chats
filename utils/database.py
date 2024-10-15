@@ -120,7 +120,7 @@ class Database(object):
         return {'question_id': -1, 'question': ''}
     
 
-    def save_intros(self, channel: str, paired_users: list[list[str]], paired_group_channels: list[str], ice_breaker: dict) -> bool:
+    def save_intros(self, channel: str, paired_users: list[list[str]], paired_group_channels: list[str], ice_breaker: dict):
         table = self.intros
         current_date = datetime.today().strftime('%Y-%m-%d')
         
@@ -129,11 +129,6 @@ class Database(object):
         
         if active_intro:
             active_intro_date = active_intro[0]['date']
-            
-            if active_intro_date == current_date:
-                logging.warning(f'Already had a match today for f{channel} - skipping.')
-                return False
-            
             self._expire_intro(channel, active_intro_date)
             
         self.create_or_update_channel_settings(channel, last_coffee_chat_dt=current_date)
@@ -152,8 +147,6 @@ class Database(object):
                 for users, group_channel in zip(paired_users, paired_group_channels)
             }
         }) 
-        
-        return True
 
 
     def expire_old_intros(self) -> None:

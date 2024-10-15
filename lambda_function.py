@@ -45,14 +45,35 @@ app = App(
     process_before_response=True 
 )
 
-def split_into_pairs(users: list[str]) -> list[list[str]]:
+def randomize_users(users: list[str]) -> list[list[str]]:
     random.shuffle(users)
-    pairs = []
-    for i in range(0, len(users) - 1, 2):
-        pairs.append([users[i], users[i+1]])
-    if len(users) % 2:
-        pairs[-1].append(users[-1])
-    return pairs
+
+    two_person_chats = users[:len(users)//2]
+    three_person_chats = users[len(users)//2:]
+
+    coffee_chats = []
+    leftovers = []
+
+    for i in range(0, len(three_person_chats), 3):
+        coffee_chat = three_person_chats[i:i+3]
+        if len(coffee_chat) == 3:
+            coffee_chats.append(coffee_chat)
+        else:
+            leftovers.extend(coffee_chat)
+    
+    for i in range(0, len(two_person_chats), 2):
+        coffee_chat = two_person_chats[i:i+2]
+        if len(coffee_chat) == 2:
+            coffee_chats.append(coffee_chat)
+        else:
+            leftovers.extend(coffee_chat)
+
+    if len(leftovers) == 1:
+        coffee_chats[-1].extend(leftovers)
+    if len(leftovers) > 1:
+        coffee_chats.append(leftovers)
+
+    return coffee_chats
 
 
 def _pair_users() -> None:
@@ -78,6 +99,8 @@ def _pair_users() -> None:
         # Get users to pair.
         users = get_channel_users(app.client, channel)
         paused_users = db.get_paused_intros(channel)
+        print(f'Users in channel: {len(users)}')
+        print(f'Paused users: {len(paused_users)}')
         users = [u for u in users if u not in paused_users]
 
         # Calculate stats for previous intro.
@@ -113,7 +136,7 @@ def _pair_users() -> None:
         if len(users) < 2:
             logging.warning(f'Too few users in {channel}')
             continue
-        paired_users = split_into_pairs(users)
+        paired_users = randomize_users(users)
         
         # Send intro messages.
         paired_group_channels = []
@@ -123,9 +146,7 @@ def _pair_users() -> None:
         if ice_breaker_question is None:
             ice_breaker_question = db.get_ice_breaker_question()
             
-        intros_were_saved = db.save_intros(channel, paired_users, paired_group_channels, ice_breaker_question)
-        if not intros_were_saved:
-            continue
+        db.save_intros(channel, paired_users, paired_group_channels, ice_breaker_question)
 
         for user_pair, group_channel in zip(paired_users, paired_group_channels):
 
@@ -156,6 +177,9 @@ def _ask_for_engagement() -> None:
 
 
 def _execute_scheduled_event():
+    week = datetime.today().isocalendar().week
+    weekday = datetime.today().isocalendar().weekday
+        
     if (week % 3 == 2 and weekday == 1):
         # Every third Monday.
         _pair_users()
@@ -246,10 +270,7 @@ def lambda_handler(event, context):
     if event.get('source') == 'aws.events':
         
         print('Scheduled event')
-        
-        week = datetime.today().isocalendar().week
-        weekday = datetime.today().isocalendar().weekday
-        
+
         # Dev event.
         if event.get('force_pairing'):
             _pair_users()
