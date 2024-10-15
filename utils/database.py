@@ -71,8 +71,13 @@ class Database(object):
         return None
         
         
-    def get_or_update_channel_settings(self, channel: str, frequency: str = None, last_coffee_chat_dt: str = None) -> dict:
-        channel_metadata = self.get_channel_settings(channel)
+    def get_or_update_channel_settings(self, channel: str, new_add: bool = False, frequency: str = None, last_coffee_chat_dt: str = None) -> dict:
+        
+        if new_add:
+            channel_metadata = None
+        else:
+            channel_metadata = self.get_channel_settings(channel)
+        
         if channel_metadata and not frequency and not last_coffee_chat_dt:
             return channel_metadata
         
