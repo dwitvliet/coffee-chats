@@ -23,18 +23,12 @@ def get_member_channels(client: WebClient) -> list[str]:
 
 
 def get_channel_info(client: WebClient, channel: str) -> dict:
-    print('a1')
-    response = client.conversations_info(channel=channel)
     try:
-        print('a2')
         response = client.conversations_info(channel=channel)
-        print('a3')
         return response.get('channel', {})
 
     except SlackApiError as e:
-        print('a4')
         logging.info(f"Error fetching channel info: {e.response['error']}")
-        print('a5')
         return {}
     
 

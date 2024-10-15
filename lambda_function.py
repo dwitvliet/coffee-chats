@@ -155,8 +155,9 @@ def handle_command(ack, body, logger):
     user = body['user_id']
 
     channel_info = get_channel_info(app.client, channel)
+    print(channel_info)
     response_message = None
-    if not channel_info.get('is_member'):
+    if channel_info.get('is_mpim') or not channel_info.get('is_member'):
         response_message = f'{command} only works in channels that I have been added to!'
     elif command == '/coffee_pause':
         db.pause_intros(channel, user)
