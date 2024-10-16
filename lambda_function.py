@@ -46,6 +46,96 @@ app = App(
     process_before_response=True 
 )
 
+
+
+@app.command('/coffee_chat')
+def handle_command(ack, body, logger):
+    ack()
+    print(f"Command received: {body}")
+    
+    command = body['command']
+    argument = body['text']
+    response_url = body['response_url']
+    channel = body['channel_id']
+    user = body['user_id']
+    
+    print(body)
+    channel_info = get_channel_info(app.client, channel)
+    response_type = 'ephemeral'
+
+    if channel_info.get('is_mpim') or not channel_info.get('is_member'):
+        response_message = f'{command} only works in channels that I have been added to!'
+        
+    elif argument == 'pause':
+        db.pause_intros(channel, user)
+        response_message = f'Coffee chats have been paused for you in <#{channel}>. To be included in coffee chats again, you can run `/coffee_chat resume` here at any time.'
+    elif argument == 'resume':
+        next_pairing_date = db.get_next_pairing_date(channel)
+        db.resume_intros(channel, user)
+        response_message = f'Coffee chats have been resumed for you in <#{channel}>. You will be included in the next round on {next_pairing_date.strftime("%b %-d")}!'
+    elif argument in ('set biweekly', 'set triweekly'):
+        db.get_or_update_channel_settings(channel, frequency=argument.split()[1])
+        response_message = f'<@{user}> set coffee chats in <#{channel}> to {argument.split()[1]}.'
+        response_type = 'in_channel'
+        next_pairing_date = db.get_next_pairing_date(channel)
+        set_channel_topic(app.client, channel, f'Next coffee chats: {next_pairing_date.strftime("%b %-d")}')
+
+    
+    else:
+        response_message = 'Unknown command. Must be either `/coffee_chat pause` or `/coffee_chat resume`.'
+    
+
+    print(response_message)
+    respond_to_http_call(response_url, response_message, response_type)
+
+
+@app.action('meeting_happened')
+@app.action('meeting_did_not_happen')
+@app.action('meeting_will_happen')
+def handle_command(ack, body, logger):
+    ack()
+    print(f"Action received: {body}")
+    
+    action = body['actions'][0]['action_id']
+    response_url = body['response_url']
+    channel = body['actions'][0]['value']
+    group_channel = body['channel']['id']
+    user = body['user']['id']
+
+    # Store action.
+    happened = action in ('meeting_happened', 'meeting_will_happen')
+    update_success = db.update_intro_happened(channel, group_channel, happened)
+    
+    # Return response.
+    response_message = None
+    if not update_success:
+        response_message = 'Response button expired.'
+    elif action == 'meeting_happened':
+        response_message = f'<@{user}> said that *you met*. Awesome!'
+    elif action == 'meeting_did_not_happen':
+        response_message = f'<@{user}> said that *you haven\'t met yet*.'
+    elif action == 'meeting_will_happen':
+        response_message = f'<@{user}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
+
+    if response_message:
+        respond_to_http_call(response_url, response_message, 'in_channel')
+
+
+@app.event('member_joined_channel')
+def handle_member_joined_channel(event, say):
+    user_joined = event.get('user')
+    channel = event.get('channel')
+    bot_user = app.client.auth_test()['user_id']
+    print(f'{user_joined} joined {channel}.')
+
+    if user_joined == bot_user:
+        db.get_or_update_channel_settings(channel, new_add=True)
+        next_pairing_date = db.get_next_pairing_date(channel)
+        say(channel=channel, text=f'Hi, I will facilitate coffee chats in this channel! :coffee:\n\nThe first round will go out on *Monday* ({next_pairing_date.strftime("%b %-d")}).')
+        
+
+
+
 def randomize_users(users: list[str]) -> list[list[str]]:
     random.shuffle(users)
 
@@ -109,7 +199,7 @@ def _pair_users(channel, ice_breaker_question) -> None:
     for user in users:
         if missed_intros[user] >= 2:
             db.pause_intros(channel, user)
-            send_message(app.client, user, {'text': f'Intros have been paused for you in <#{channel}> due to inactivity (missing your last two intros). To be included in the next round of intros, run `/coffee_chat resume` in the channel at any time.'})
+            send_message(app.client, user, {'text': f'Coffee chats have been paused for you in <#{channel}> due to inactivity (missing your last two coffee chats). To be included in the next round, run `/coffee_chat resume` in the channel at any time.'})
             skipped_users.append(user)
             
     users = [u for u in users if u not in skipped_users]
@@ -133,7 +223,8 @@ def _pair_users(channel, ice_breaker_question) -> None:
         send_message(app.client, group_channel, schedule_coffee_chat_message)
 
     next_pairing_date = db.get_next_pairing_date(channel)
-    set_channel_topic(app.client, channel, f'Next coffee chats: {next_pairing_date.strftime("%b %d")}')
+    set_channel_topic(app.client, channel, f'Next coffee chats: {next_pairing_date.strftime("%b %-d")}')
+    
     send_message(app.client, channel, chats_scheduled_channel_message(len(paired_users), previous_intros_stats))
     
 
@@ -179,93 +270,6 @@ def _execute_scheduled_event(overwrite_today: date = None) -> None:
 
 
 
-@app.command('/coffee_chat')
-def handle_command(ack, body, logger):
-    ack()
-    print(f"Command received: {body}")
-    
-    command = body['command']
-    argument = body['text']
-    response_url = body['response_url']
-    channel = body['channel_id']
-    user = body['user_id']
-    
-    print(body)
-
-    channel_info = get_channel_info(app.client, channel)
-
-    if channel_info.get('is_mpim') or not channel_info.get('is_member'):
-        response_message = f'{command} only works in channels that I have been added to!'
-        
-    elif argument == 'pause':
-        db.pause_intros(channel, user)
-        response_message = f'Intros have been paused for you in <#{channel}>. To be included in intros again, you can run `/coffee_chat resume` here at any time.'
-    elif argument == 'resume':
-        db.resume_intros(channel, user)
-        response_message = f'Intros have been resumed for you in <#{channel}>. You will be included in the next round of intros!'
-    elif argument in ('set biweekly', 'set triweekly'):
-        db.create_or_update_channel_settings(channel, frequency=argument.split()[1])
-        response_message = f'Intros in <#{channel}> has been set to {argument.split()[1]}.'
-        if argument == 'set biweekly':
-            pass
-        if argument == 'set triweekly':
-            pass
-
-    
-    else:
-        response_message = 'Unknown command. Must be either `/coffee_chat pause` or `/coffee_chat resume`.'
-    
-
-    print(response_message)
-    respond_to_http_call(response_url, response_message, 'ephemeral')
-
-
-@app.action('meeting_happened')
-@app.action('meeting_did_not_happen')
-@app.action('meeting_will_happen')
-def handle_command(ack, body, logger):
-    ack()
-    print(f"Action received: {body}")
-    
-    action = body['actions'][0]['action_id']
-    response_url = body['response_url']
-    channel = body['actions'][0]['value']
-    group_channel = body['channel']['id']
-    user = body['user']['id']
-
-    # Store action.
-    happened = action in ('meeting_happened', 'meeting_will_happen')
-    update_success = db.update_intro_happened(channel, group_channel, happened)
-    
-    # Return response.
-    response_message = None
-    if not update_success:
-        response_message = 'Response button expired.'
-    elif action == 'meeting_happened':
-        response_message = f'<@{user}> said that *you met*. Awesome!'
-    elif action == 'meeting_did_not_happen':
-        response_message = f'<@{user}> said that *you haven\'t met yet*.'
-    elif action == 'meeting_will_happen':
-        response_message = f'<@{user}> said that you haven\'t met yet, but *it\'s scheduled to happen*. That\'s great!'
-
-    if response_message:
-        respond_to_http_call(response_url, response_message, 'in_channel')
-
-
-@app.event('member_joined_channel')
-def handle_member_joined_channel(event, say):
-    user_joined = event.get('user')
-    channel = event.get('channel')
-    bot_user = app.client.auth_test()['user_id']
-    print(f'{user_joined} joined {channel}.')
-
-    if user_joined == bot_user:
-        db.get_or_update_channel_settings(channel, new_add=True)
-        next_pairing_date = db.get_next_pairing_date(channel)
-        say(channel=channel, text=f'Hi, I will facilitate coffee chats in this channel! :coffee:\n\nThe first round will go out on *Monday* ({next_pairing_date.strftime("%b %d")}).')
-        
-
-
 def lambda_handler(event, context):
     
     print(event)
@@ -276,11 +280,11 @@ def lambda_handler(event, context):
 
         # Dev event.
         if event.get('force_pairing'):
-            db.get_or_update_channel_settings('C051N2XP2NS', frequency='biweekly', last_coffee_chat_dt='2024-10-07')
-            _execute_scheduled_event(overwrite_today=date(2024, 10, 21))
+            db.get_or_update_channel_settings('C051N2XP2NS', frequency='triweekly', last_coffee_chat_dt='2024-09-16')
+            _execute_scheduled_event(overwrite_today=date(2024, 10, 7))
             return
         if event.get('force_ask_for_engagement'):
-            db.get_or_update_channel_settings('C051N2XP2NS', frequency='biweekly', last_coffee_chat_dt='2024-10-14')
+            db.get_or_update_channel_settings('C051N2XP2NS', frequency='triweekly', last_coffee_chat_dt='2024-10-07')
             _execute_scheduled_event(overwrite_today=date(2024, 10, 21))
             return
         

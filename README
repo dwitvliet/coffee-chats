@@ -21,3 +21,4 @@ Dynamodb:
 - Create table `paused_users` with partition column `channel` and sort column `user`.
 - Create table `ice_breaker_questions` with partition column `question_id`.
 - Create index `is_active-times_used-index` with partition column `is_active` (N) and sort column `times_used` (N).
+- Create table `channels` with partition column `channel` (S).

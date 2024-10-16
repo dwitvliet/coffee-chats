@@ -87,7 +87,8 @@ class Database(object):
                 'added_dt': datetime.today().strftime('%Y-%m-%d'),
                 'frequency': 'triweekly',
                 'is_active': True,
-                'last_coffee_chat_dt': None
+                'last_coffee_chat_dt': None,
+                'last_engagement_asked_dt': None
             }
         
         if frequency:

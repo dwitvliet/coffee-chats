@@ -16,7 +16,7 @@ Start your chat this week by answering the question:
     
 def chats_scheduled_channel_message(n_pairs: int, previous_intros_stats: Optional[dict] = None) -> dict:
     
-    message = f'''*{n_pairs}* coffee chat pairings have just been sent out!'''
+    message = f'''A new round of *{n_pairs}* coffee chats has just been sent out!'''
     
     if previous_intros_stats:
         intros_count = previous_intros_stats['intros_count']
