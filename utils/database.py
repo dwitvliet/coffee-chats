@@ -72,14 +72,14 @@ class Database(object):
         return None
         
         
-    def get_or_update_channel_settings(self, channel: str, new_add: bool = False, frequency: str = None, last_coffee_chat_dt: str = None) -> dict:
-        
+    def get_or_update_channel_settings(self, channel: str, new_add: bool = False, frequency: str = None, last_coffee_chat_dt: str = None, last_engagement_asked_dt: str = None) -> dict:
+
         if new_add:
             channel_metadata = None
         else:
             channel_metadata = self.get_channel_settings(channel)
         
-        if channel_metadata and not frequency and not last_coffee_chat_dt:
+        if channel_metadata and not frequency and not last_coffee_chat_dt and not last_engagement_asked_dt:
             return channel_metadata
         
         if not channel_metadata:
@@ -97,6 +97,9 @@ class Database(object):
             
         if last_coffee_chat_dt:
             channel_metadata['last_coffee_chat_dt'] = last_coffee_chat_dt
+            
+        if last_engagement_asked_dt:
+            channel_metadata['last_engagement_asked_dt'] = last_engagement_asked_dt
         
         self.channels.put_item(Item=channel_metadata) 
         
@@ -132,7 +135,8 @@ class Database(object):
     def get_next_engagement_survey_date(self, channel: str) -> date:
         next_pairing_date = self.get_next_pairing_date(channel)
         next_engagement_survey_date = next_pairing_date - timedelta(7)
-        if next_engagement_survey_date == datetime.fromisoformat(self.get_or_update_channel_settings(channel)['last_engagement_asked_dt'] or '9999-12-31'):
+        last_engagement_survey_date = datetime.fromisoformat(self.get_or_update_channel_settings(channel)['last_engagement_asked_dt'] or '9999-12-31').date()
+        if next_engagement_survey_date == last_engagement_survey_date:
             print('Already did survey for this round')
             next_engagement_survey_date = date(9999, 12, 31)
         return next_engagement_survey_date
@@ -166,7 +170,7 @@ class Database(object):
 
     def save_intros(self, channel: str, paired_users: list[list[str]], paired_group_channels: list[str], ice_breaker: dict):
         table = self.intros
-        current_date = datetime.today().strftime('%Y-%m-%d')
+        current_date = datetime.today().date().isoformat()
         
         # Set previous intros as inactive.
         active_intro = self.get_active_intro(channel)

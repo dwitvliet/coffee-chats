@@ -230,12 +230,13 @@ def _pair_users(channel, ice_breaker_question) -> None:
 
 
 def _ask_for_engagement(channel) -> None:
-    print('Asking for engagement')
-    
+
     active_intro = db.get_active_intro(channel)
     if not active_intro:
         print('Warning: no active intro.')
+        return
 
+    db.get_or_update_channel_settings(channel, last_engagement_asked_dt=datetime.today().date().isoformat())
     for group_channel, users in active_intro['intros'].items(): 
         send_message(
             app.client, 
@@ -280,11 +281,11 @@ def lambda_handler(event, context):
 
         # Dev event.
         if event.get('force_pairing'):
-            db.get_or_update_channel_settings('C051N2XP2NS', frequency='triweekly', last_coffee_chat_dt='2024-09-16')
+            db.get_or_update_channel_settings('C051N2XP2NS', frequency='triweekly', last_coffee_chat_dt='2024-10-07')
             _execute_scheduled_event(overwrite_today=date(2024, 10, 7))
             return
         if event.get('force_ask_for_engagement'):
-            db.get_or_update_channel_settings('C051N2XP2NS', frequency='triweekly', last_coffee_chat_dt='2024-10-07')
+            db.get_or_update_channel_settings('C051N2XP2NS', frequency='triweekly', last_coffee_chat_dt='2024-10-07', last_engagement_asked_dt='2024-10-21')
             _execute_scheduled_event(overwrite_today=date(2024, 10, 21))
             return
         
