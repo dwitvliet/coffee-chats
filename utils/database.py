@@ -42,7 +42,8 @@ class Database(object):
     def save_access_token(self, team: str, access_token: str):
         self.access_tokens.put_item(Item={
             'team': team,
-            'token': access_token
+            'token': access_token,
+            'added_dt': datetime.now().date().isoformat()
         }) 
         
     def get_access_token(self, team: str) -> str:
