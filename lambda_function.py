@@ -187,11 +187,13 @@ def _pair_users(channel, ice_breaker_question) -> None:
         previous_intros_stats = None
         
     # Determine which users need to be skipped due to inactivity.
+    recent_paired_users = set()
     missed_intros = defaultdict(int)
     for round in recent_intros:
         for intro in round['intros'].values():
             if intro['happened']:
                 continue
+            recent_paired_users.add(tuple(sorted(intro['users'])))
             for user in intro['users']:
                 missed_intros[user] += 1
     
@@ -210,6 +212,15 @@ def _pair_users(channel, ice_breaker_question) -> None:
         logging.warning(f'Too few users in {channel}')
         return
     paired_users = randomize_users(users)
+
+    # Try again if repeat match.
+    repeat_match = False
+    for user_pair in paired_users:
+        if tuple(sorted(user_pair)) in recent_paired_users:
+            repeat_match = True
+            break
+    if repeat_match:
+        paired_users = randomize_users(users)
     
     # Send intro messages.
     paired_group_channels = []
